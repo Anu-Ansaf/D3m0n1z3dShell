@@ -39,21 +39,32 @@ sudo curl -s https://raw.githubusercontent.com/MatheuZSecurity/D3m0n1z3dShell/ma
 * ICMP Backdoor 
 * LD_PRELOAD Setup PrivEsc
 * Static Binaries For Process Monitoring, Dump credentials, Enumeration, Trolling and Others Binaries.
+* Process Injection (ptrace-based)
+* One-Liner Install (curl | bash)
+* Static D3m0n1z3dShell
+* ELF/Rootkit Anti-Reversing Technique
+* rc.local Persistence
+* Init.d Persistence
+* MOTD Persistence
+* Persistence via ACL
+* Reverse shell with a process name of your choice
+* Udev Persistence (Net/USB/Block/Custom triggers)
+* LKM Rootkit Persistence After Reboot (6-layer persistence)
+* PAM Backdoor
+* SSH Authorized Keys Backdoor
+* Logrotate Persistence
+* Git Hooks Persistence
+* XDG Autostart Persistence
+* At Job Persistence
+* DKMS Integration for LKM Rootkit (auto-recompile on kernel update)
+* Process Hiding via Bind Mount (mount --bind /proc overlay)
+* Hidepid /proc Mount (hide processes from non-root users)
+* Initramfs Injection (ultra-persistent, loads before root FS)
+* Package Manager Backdoor (.deb with postinst rootkit loader)
+* Depmod Stealth (hide module from modules.dep inspection)
+* Namespace Jail (container-based rootkit — trap users in isolated namespaces)
 
 ### Pending Features
-
-* [X] Process Injection
-* [x] install for example: curl github.com/test/test/demonized.sh | bash
-* [x] Static D3m0n1z3dShell
-* [x] ELF/Rootkit Anti-Reversing Technique
-* [ ] PAM Backdoor
-* [x] rc.local Persistence
-* [x] init.d Persistence
-* [x] motd Persistence
-* [x] Persistence via ACL.
-* [x] Reverse shell with a process name of your choice.
-* [ ] Udev persistence.
-* [ ] LKM Rootkit persistence after reboot.
 
 And other types of features that will come in the future.
 

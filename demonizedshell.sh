@@ -260,6 +260,102 @@ procnamerev(){
 	./procname.sh
 }
 
+processInjection(){
+	chmod +x scripts/procinject.sh
+	cd scripts
+	./procinject.sh
+}
+
+udevPersistence(){
+	chmod +x scripts/udev.sh
+	cd scripts
+	./udev.sh
+}
+
+lkmPersistReboot(){
+	chmod +x scripts/lkm_persist.sh
+	cd scripts
+	./lkm_persist.sh
+}
+
+pamBackdoor(){
+	chmod +x scripts/pam.sh
+	cd scripts
+	./pam.sh
+}
+
+sshAuthkeysBackdoor(){
+	chmod +x scripts/ssh_authkeys.sh
+	cd scripts
+	./ssh_authkeys.sh
+}
+
+logrotatePersistence(){
+	chmod +x scripts/logrotate.sh
+	cd scripts
+	./logrotate.sh
+}
+
+githooksPersistence(){
+	chmod +x scripts/githooks.sh
+	cd scripts
+	./githooks.sh
+}
+
+xdgPersistence(){
+	chmod +x scripts/xdg.sh
+	cd scripts
+	./xdg.sh
+}
+
+atjobPersistence(){
+	chmod +x scripts/atjob.sh
+	cd scripts
+	./atjob.sh
+}
+
+dkmsRootkit(){
+	chmod +x scripts/dkms_rootkit.sh
+	cd scripts
+	./dkms_rootkit.sh
+}
+
+bindmountHide(){
+	chmod +x scripts/bindmount_hide.sh
+	cd scripts
+	./bindmount_hide.sh
+}
+
+hidepidProc(){
+	chmod +x scripts/hidepid.sh
+	cd scripts
+	./hidepid.sh
+}
+
+initramfsInject(){
+	chmod +x scripts/initramfs_inject.sh
+	cd scripts
+	./initramfs_inject.sh
+}
+
+debBackdoor(){
+	chmod +x scripts/deb_backdoor.sh
+	cd scripts
+	./deb_backdoor.sh
+}
+
+depmodStealth(){
+	chmod +x scripts/depmod_stealth.sh
+	cd scripts
+	./depmod_stealth.sh
+}
+
+namespaceJail(){
+	chmod +x scripts/ns_jail.sh
+	cd scripts
+	./ns_jail.sh
+}
+
 banner() {
     rainbow "
                                   ,
@@ -300,6 +396,22 @@ menu() {
                                   [15] Motd Persistence
                                   [16] ACL Persistence.
                                   [17] Reverse shell with a process name of your choice.
+                                  [18] Process Injection
+                                  [19] Udev Persistence (Net/USB/Block/Custom)
+                                  [20] LKM Rootkit Persistence After Reboot
+                                  [21] PAM Backdoor
+                                  [22] SSH Authorized Keys Backdoor
+                                  [23] Logrotate Persistence
+                                  [24] Git Hooks Persistence
+                                  [25] XDG Autostart Persistence
+                                  [26] At Job Persistence
+                                  [27] DKMS Integration for LKM Rootkit
+                                  [28] Process Hiding via Bind Mount
+                                  [29] Hidepid /proc Mount
+                                  [30] Initramfs Injection (Ultra-Persistent)
+                                  [31] Package Manager Backdoor (.deb)
+                                  [32] Depmod Stealth (Hide from modules.dep)
+                                  [33] Namespace Jail (Container-Based Rootkit)
 
     [*] Coming soon others features [*]
 
@@ -343,6 +455,38 @@ EOF
         acl
     elif [ "$MENUINPUT" == "17" ] || [ "$MENUINPUT" == "17" ]; then
         procnamerev
+    elif [ "$MENUINPUT" == "18" ] || [ "$MENUINPUT" == "18" ]; then
+        processInjection
+    elif [ "$MENUINPUT" == "19" ] || [ "$MENUINPUT" == "19" ]; then
+        udevPersistence
+    elif [ "$MENUINPUT" == "20" ] || [ "$MENUINPUT" == "20" ]; then
+        lkmPersistReboot
+    elif [ "$MENUINPUT" == "21" ] || [ "$MENUINPUT" == "21" ]; then
+        pamBackdoor
+    elif [ "$MENUINPUT" == "22" ] || [ "$MENUINPUT" == "22" ]; then
+        sshAuthkeysBackdoor
+    elif [ "$MENUINPUT" == "23" ] || [ "$MENUINPUT" == "23" ]; then
+        logrotatePersistence
+    elif [ "$MENUINPUT" == "24" ] || [ "$MENUINPUT" == "24" ]; then
+        githooksPersistence
+    elif [ "$MENUINPUT" == "25" ] || [ "$MENUINPUT" == "25" ]; then
+        xdgPersistence
+    elif [ "$MENUINPUT" == "26" ] || [ "$MENUINPUT" == "26" ]; then
+        atjobPersistence
+    elif [ "$MENUINPUT" == "27" ] || [ "$MENUINPUT" == "27" ]; then
+        dkmsRootkit
+    elif [ "$MENUINPUT" == "28" ] || [ "$MENUINPUT" == "28" ]; then
+        bindmountHide
+    elif [ "$MENUINPUT" == "29" ] || [ "$MENUINPUT" == "29" ]; then
+        hidepidProc
+    elif [ "$MENUINPUT" == "30" ] || [ "$MENUINPUT" == "30" ]; then
+        initramfsInject
+    elif [ "$MENUINPUT" == "31" ] || [ "$MENUINPUT" == "31" ]; then
+        debBackdoor
+    elif [ "$MENUINPUT" == "32" ] || [ "$MENUINPUT" == "32" ]; then
+        depmodStealth
+    elif [ "$MENUINPUT" == "33" ] || [ "$MENUINPUT" == "33" ]; then
+        namespaceJail
     else 
         echo "This option does not exist"
     fi
