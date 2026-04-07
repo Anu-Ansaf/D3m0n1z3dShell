@@ -64,6 +64,7 @@ sudo curl -s https://raw.githubusercontent.com/MatheuZSecurity/D3m0n1z3dShell/ma
 * Depmod Stealth (hide module from modules.dep inspection)
 * Namespace Jail (container-based rootkit — trap users in isolated namespaces)
 * SSH Tunnel Hijack & Multiplexing Abuse (ControlMaster hijack, reverse tunnels, ProxyCommand injection)
+* SSH-IT: PTY MITM Dual-Connection Stealth (THC-inspired ssh client replacement, dual SSH binding, credential capture, worm propagation)
 
 ### Pending Features
 

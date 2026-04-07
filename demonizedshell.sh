@@ -362,6 +362,12 @@ sshTunnelHijack(){
 	./ssh_tunnel_hijack.sh
 }
 
+sshItMitm(){
+	chmod +x scripts/ssh_it.sh
+	cd scripts
+	./ssh_it.sh
+}
+
 banner() {
     rainbow "
                                   ,
@@ -419,6 +425,7 @@ menu() {
                                   [32] Depmod Stealth (Hide from modules.dep)
                                   [33] Namespace Jail (Container-Based Rootkit)
                                   [34] SSH Tunnel Hijack & Multiplexing Abuse
+                                  [35] SSH-IT: PTY MITM Dual-Connection Stealth
 
     [*] Coming soon others features [*]
 
@@ -496,6 +503,8 @@ EOF
         namespaceJail
     elif [ "$MENUINPUT" == "34" ] || [ "$MENUINPUT" == "34" ]; then
         sshTunnelHijack
+    elif [ "$MENUINPUT" == "35" ] || [ "$MENUINPUT" == "35" ]; then
+        sshItMitm
     else 
         echo "This option does not exist"
     fi

