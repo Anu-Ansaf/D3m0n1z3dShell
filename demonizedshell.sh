@@ -356,6 +356,12 @@ namespaceJail(){
 	./ns_jail.sh
 }
 
+sshTunnelHijack(){
+	chmod +x scripts/ssh_tunnel_hijack.sh
+	cd scripts
+	./ssh_tunnel_hijack.sh
+}
+
 banner() {
     rainbow "
                                   ,
@@ -412,6 +418,7 @@ menu() {
                                   [31] Package Manager Backdoor (.deb)
                                   [32] Depmod Stealth (Hide from modules.dep)
                                   [33] Namespace Jail (Container-Based Rootkit)
+                                  [34] SSH Tunnel Hijack & Multiplexing Abuse
 
     [*] Coming soon others features [*]
 
@@ -487,6 +494,8 @@ EOF
         depmodStealth
     elif [ "$MENUINPUT" == "33" ] || [ "$MENUINPUT" == "33" ]; then
         namespaceJail
+    elif [ "$MENUINPUT" == "34" ] || [ "$MENUINPUT" == "34" ]; then
+        sshTunnelHijack
     else 
         echo "This option does not exist"
     fi

