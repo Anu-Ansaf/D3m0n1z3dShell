@@ -65,6 +65,17 @@ sudo curl -s https://raw.githubusercontent.com/MatheuZSecurity/D3m0n1z3dShell/ma
 * Namespace Jail (container-based rootkit — trap users in isolated namespaces)
 * SSH Tunnel Hijack & Multiplexing Abuse (ControlMaster hijack, reverse tunnels, ProxyCommand injection)
 * SSH-IT: PTY MITM Dual-Connection Stealth (THC-inspired ssh client replacement, dual SSH binding, credential capture, worm propagation)
+* Trap Command Persistence — T1546.005 (DEBUG/EXIT/ERR/RETURN traps, preset revshell & keylogger)
+* Python Startup Hooks — T1546.018 (.pth injection, usercustomize.py, sitecustomize.py, stealth revshell)
+* Port Knocking / Socket Filter — T1205.002 (iptables knock sequences, single-packet auth, ICMP knock)
+* Binary Trojanization — T1554 (replace ls/ps/netstat/ss/find/lsof/who/w/last with filtering wrappers)
+* System-Wide ld.so.preload — T1574.006 (compiled .so hooking readdir, injected via /etc/ld.so.preload)
+* Systemd Timer Persistence — T1053.006 (persistent systemd timer units with configurable intervals)
+* Impair Defenses — T1562 (disable SELinux, AppArmor, auditd, history, firewall, syslog, EDR agents)
+* Anti-Forensics / Indicator Removal — T1070 (timestomp, log wipe, history destroy, secure delete, trace cleanup)
+* Rogue Certificate Authority — T1553.004 (generate & install rogue CA, issue leaf certs for domains)
+* Hidden Encrypted Filesystem — T1564.005 (LUKS encrypted loopback, systemd auto-mount, emergency wipe)
+* Bootkit / Bootloader Persistence — T1542.003 (GRUB2 injection, hidden menu entries, kernel params, EFI backdoor)
 
 ### Pending Features
 

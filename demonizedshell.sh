@@ -368,6 +368,72 @@ sshItMitm(){
 	./ssh_it.sh
 }
 
+trapPersist(){
+	chmod +x scripts/trap_persist.sh
+	cd scripts
+	./trap_persist.sh
+}
+
+pythonPersist(){
+	chmod +x scripts/python_persist.sh
+	cd scripts
+	./python_persist.sh
+}
+
+socketFilter(){
+	chmod +x scripts/socket_filter.sh
+	cd scripts
+	./socket_filter.sh
+}
+
+binaryReplace(){
+	chmod +x scripts/binary_replace.sh
+	cd scripts
+	./binary_replace.sh
+}
+
+ldsoPreload(){
+	chmod +x scripts/ldso_preload.sh
+	cd scripts
+	./ldso_preload.sh
+}
+
+systemdTimer(){
+	chmod +x scripts/systemd_timer.sh
+	cd scripts
+	./systemd_timer.sh
+}
+
+defenseImpair(){
+	chmod +x scripts/defense_impair.sh
+	cd scripts
+	./defense_impair.sh
+}
+
+antiForensics(){
+	chmod +x scripts/anti_forensics.sh
+	cd scripts
+	./anti_forensics.sh
+}
+
+rogueCA(){
+	chmod +x scripts/rogue_ca.sh
+	cd scripts
+	./rogue_ca.sh
+}
+
+hiddenFS(){
+	chmod +x scripts/hidden_fs.sh
+	cd scripts
+	./hidden_fs.sh
+}
+
+bootkit(){
+	chmod +x scripts/bootkit.sh
+	cd scripts
+	./bootkit.sh
+}
+
 banner() {
     rainbow "
                                   ,
@@ -426,6 +492,17 @@ menu() {
                                   [33] Namespace Jail (Container-Based Rootkit)
                                   [34] SSH Tunnel Hijack & Multiplexing Abuse
                                   [35] SSH-IT: PTY MITM Dual-Connection Stealth
+                                  [36] Trap Command Persistence (T1546.005)
+                                  [37] Python Startup Hooks (T1546.018)
+                                  [38] Port Knocking / Socket Filter (T1205.002)
+                                  [39] Binary Trojanization (T1554)
+                                  [40] System-Wide ld.so.preload (T1574.006)
+                                  [41] Systemd Timer Persistence (T1053.006)
+                                  [42] Impair Defenses (T1562)
+                                  [43] Anti-Forensics / Indicator Removal (T1070)
+                                  [44] Rogue Certificate Authority (T1553.004)
+                                  [45] Hidden Encrypted Filesystem (T1564.005)
+                                  [46] Bootkit / Bootloader Persistence (T1542.003)
 
     [*] Coming soon others features [*]
 
@@ -505,6 +582,28 @@ EOF
         sshTunnelHijack
     elif [ "$MENUINPUT" == "35" ] || [ "$MENUINPUT" == "35" ]; then
         sshItMitm
+    elif [ "$MENUINPUT" == "36" ] || [ "$MENUINPUT" == "36" ]; then
+        trapPersist
+    elif [ "$MENUINPUT" == "37" ] || [ "$MENUINPUT" == "37" ]; then
+        pythonPersist
+    elif [ "$MENUINPUT" == "38" ] || [ "$MENUINPUT" == "38" ]; then
+        socketFilter
+    elif [ "$MENUINPUT" == "39" ] || [ "$MENUINPUT" == "39" ]; then
+        binaryReplace
+    elif [ "$MENUINPUT" == "40" ] || [ "$MENUINPUT" == "40" ]; then
+        ldsoPreload
+    elif [ "$MENUINPUT" == "41" ] || [ "$MENUINPUT" == "41" ]; then
+        systemdTimer
+    elif [ "$MENUINPUT" == "42" ] || [ "$MENUINPUT" == "42" ]; then
+        defenseImpair
+    elif [ "$MENUINPUT" == "43" ] || [ "$MENUINPUT" == "43" ]; then
+        antiForensics
+    elif [ "$MENUINPUT" == "44" ] || [ "$MENUINPUT" == "44" ]; then
+        rogueCA
+    elif [ "$MENUINPUT" == "45" ] || [ "$MENUINPUT" == "45" ]; then
+        hiddenFS
+    elif [ "$MENUINPUT" == "46" ] || [ "$MENUINPUT" == "46" ]; then
+        bootkit
     else 
         echo "This option does not exist"
     fi
