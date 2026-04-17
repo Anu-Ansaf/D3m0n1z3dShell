@@ -1,0 +1,4 @@
+build/
+payloads/*.ps1
+*.pyc
+__pycache__/

