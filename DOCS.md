@@ -27,6 +27,7 @@
     - [25 — XDG Autostart Persistence](#25--xdg-autostart-persistence)
     - [26 — At Job Persistence](#26--at-job-persistence)
     - [27 — DKMS Integration for LKM Rootkit](#27--dkms-integration-for-lkm-rootkit)
+    - [30 — Initramfs Injection (Ultra-Persistent)](#30--initramfs-injection-ultra-persistent)
     - [36 — Trap Command Persistence](#36--trap-command-persistence)
     - [37 — Python Startup Hooks](#37--python-startup-hooks)
     - [41 — Systemd Timer Persistence](#41--systemd-timer-persistence)
@@ -735,6 +736,36 @@ flowchart TD
     style H fill:#ff8800,color:#fff
     style I fill:#ff8800,color:#fff
     style L fill:#44aa44,color:#fff
+```
+
+---
+
+### 30 — Initramfs Injection (Ultra-Persistent)
+
+**Script:** `scripts/initramfs_inject.sh` | **Menu:** [30] | **MITRE:** T1542.003  
+**Purpose:** Inject a kernel module into initramfs — loads before root filesystem mounts, the earliest possible persistence.
+
+```mermaid
+flowchart TD
+    A["initramfs_inject.sh"] --> B{"EUID == 0?"}
+    B -->|No| Z["Exit"]
+    B -->|Yes| C["Find initramfs:<br>/boot/initrd.img-KVER<br>or /boot/initramfs-KVER.img"]
+    C --> D["read ko_path (module to inject)"]
+    D --> E["Backup: cp initrd to initrd.bak.TIMESTAMP"]
+    E --> F["Extract initramfs:<br>unmkinitramfs (preferred)<br>or zcat | cpio -idm<br>or xzcat/lz4cat fallbacks"]
+    F --> G["Inject: cp .ko to<br>ROOTFS/lib/modules/KVER/kernel/lib/"]
+    G --> H["Find init script in extracted rootfs"]
+    H --> I["Inject insmod command<br>after shebang line (line 2)"]
+    I --> J["Rebuild: find . | cpio -o -H newc | gzip"]
+    J --> K["Write rebuilt initramfs to /boot/"]
+    K --> L["Install postinst.d hook<br>for future kernel updates"]
+    L --> M["dmesg -C (clear traces)"]
+    M --> N["Module loads at boot<br>BEFORE root filesystem mounts"]
+
+    style A fill:#ff4444,color:#fff
+    style I fill:#ff0000,color:#fff
+    style J fill:#ff8800,color:#fff
+    style N fill:#44aa44,color:#fff
 ```
 
 ---
@@ -2181,36 +2212,6 @@ flowchart TD
     style C fill:#ff8800,color:#fff
     style K fill:#44aa44,color:#fff
     style M fill:#44aa44,color:#fff
-```
-
----
-
-## Initramfs Injection (Ultra-Persistent)
-
-**Script:** `scripts/initramfs_inject.sh` | **Menu:** [30] | **MITRE:** T1542.003  
-**Purpose:** Inject a kernel module into initramfs — loads before root filesystem mounts, the earliest possible persistence.
-
-```mermaid
-flowchart TD
-    A["initramfs_inject.sh"] --> B{"EUID == 0?"}
-    B -->|No| Z["Exit"]
-    B -->|Yes| C["Find initramfs:<br>/boot/initrd.img-KVER<br>or /boot/initramfs-KVER.img"]
-    C --> D["read ko_path (module to inject)"]
-    D --> E["Backup: cp initrd to initrd.bak.TIMESTAMP"]
-    E --> F["Extract initramfs:<br>unmkinitramfs (preferred)<br>or zcat | cpio -idm<br>or xzcat/lz4cat fallbacks"]
-    F --> G["Inject: cp .ko to<br>ROOTFS/lib/modules/KVER/kernel/lib/"]
-    G --> H["Find init script in extracted rootfs"]
-    H --> I["Inject insmod command<br>after shebang line (line 2)"]
-    I --> J["Rebuild: find . | cpio -o -H newc | gzip"]
-    J --> K["Write rebuilt initramfs to /boot/"]
-    K --> L["Install postinst.d hook<br>for future kernel updates"]
-    L --> M["dmesg -C (clear traces)"]
-    M --> N["Module loads at boot<br>BEFORE root filesystem mounts"]
-
-    style A fill:#ff4444,color:#fff
-    style I fill:#ff0000,color:#fff
-    style J fill:#ff8800,color:#fff
-    style N fill:#44aa44,color:#fff
 ```
 
 ---
