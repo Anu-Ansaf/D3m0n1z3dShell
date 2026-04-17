@@ -542,6 +542,60 @@ winStealth(){
 	./win_stealth.sh
 }
 
+diamorphineRootkit(){
+	chmod +x scripts/diamorphine.sh
+	cd scripts
+	./diamorphine.sh
+}
+
+systemdGenerator(){
+	chmod +x scripts/systemd_generator.sh
+	cd scripts
+	./systemd_generator.sh
+}
+
+nmDispatcher(){
+	chmod +x scripts/nm_dispatcher.sh
+	cd scripts
+	./nm_dispatcher.sh
+}
+
+polkitBackdoor(){
+	chmod +x scripts/polkit_backdoor.sh
+	cd scripts
+	./polkit_backdoor.sh
+}
+
+sudoersBackdoor(){
+	chmod +x scripts/sudoers_backdoor.sh
+	cd scripts
+	./sudoers_backdoor.sh
+}
+
+ebpfHide(){
+	chmod +x scripts/ebpf_hide.sh
+	cd scripts
+	./ebpf_hide.sh
+}
+
+modprobeHijack(){
+	chmod +x scripts/modprobe_hijack.sh
+	cd scripts
+	./modprobe_hijack.sh
+}
+
+grubBackdoor(){
+	chmod +x scripts/grub_backdoor.sh
+	cd scripts
+	./grub_backdoor.sh
+}
+
+nsStashspace(){
+	chmod +x scripts/ns_stashspace.sh
+	cd scripts
+	./ns_stashspace.sh
+}
+
 banner() {
     rainbow "
                                   ,
@@ -631,6 +685,17 @@ menu() {
                                   [62] Windows Defense Evasion Generator (7 techniques)
                                   [63] Windows Credential Access Generator (5 techniques)
                                   [64] Windows Stealth & Indicator Removal (4 techniques)
+
+                                  ═══ Advanced Techniques (Research) ═══
+                                  [65] Diamorphine Rootkit Auto-Deploy (T1014)
+                                  [66] Systemd Generator Persistence (T1543.002)
+                                  [67] NetworkManager Dispatcher Persistence (T1546)
+                                  [68] Polkit Privilege Escalation Backdoor (T1548)
+                                  [69] Sudoers Backdoor (T1548.003)
+                                  [70] eBPF-Based Process/File Hiding (T1564)
+                                  [71] Modprobe.d Event Hijacking (T1547.006)
+                                  [72] GRUB Bootloader Backdoor (T1542)
+                                  [73] Mount Namespace Stashspace (T1564.001)
 
     [*] Coming soon others features [*]
 
@@ -768,6 +833,24 @@ EOF
         winCredAccess
     elif [ "$MENUINPUT" == "64" ] || [ "$MENUINPUT" == "64" ]; then
         winStealth
+    elif [ "$MENUINPUT" == "65" ] || [ "$MENUINPUT" == "65" ]; then
+        diamorphineRootkit
+    elif [ "$MENUINPUT" == "66" ] || [ "$MENUINPUT" == "66" ]; then
+        systemdGenerator
+    elif [ "$MENUINPUT" == "67" ] || [ "$MENUINPUT" == "67" ]; then
+        nmDispatcher
+    elif [ "$MENUINPUT" == "68" ] || [ "$MENUINPUT" == "68" ]; then
+        polkitBackdoor
+    elif [ "$MENUINPUT" == "69" ] || [ "$MENUINPUT" == "69" ]; then
+        sudoersBackdoor
+    elif [ "$MENUINPUT" == "70" ] || [ "$MENUINPUT" == "70" ]; then
+        ebpfHide
+    elif [ "$MENUINPUT" == "71" ] || [ "$MENUINPUT" == "71" ]; then
+        modprobeHijack
+    elif [ "$MENUINPUT" == "72" ] || [ "$MENUINPUT" == "72" ]; then
+        grubBackdoor
+    elif [ "$MENUINPUT" == "73" ] || [ "$MENUINPUT" == "73" ]; then
+        nsStashspace
     else 
         echo "This option does not exist"
     fi

