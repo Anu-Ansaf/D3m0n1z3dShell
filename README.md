@@ -76,6 +76,20 @@ sudo curl -s https://raw.githubusercontent.com/MatheuZSecurity/D3m0n1z3dShell/ma
 * Rogue Certificate Authority — T1553.004 (generate & install rogue CA, issue leaf certs for domains)
 * Hidden Encrypted Filesystem — T1564.005 (LUKS encrypted loopback, systemd auto-mount, emergency wipe)
 * Bootkit / Bootloader Persistence — T1542.003 (GRUB2 injection, hidden menu entries, kernel params, EFI backdoor)
+* Credential Harvester — T1552 (shadow dump, SSH keys, history passwords, /proc/environ, config creds, DB creds, process memory)
+* Linux Keylogger — T1056.001 (TTY capture, X11 xinput, PAM credential logging, strace stdin, systemd daemon)
+* Web Shell Deployment — T1505.003 (PHP variants, Python WSGI/CGI, Perl CGI, JSP for Tomcat, auto-detect web roots)
+* Phantom User Creation — T1136.001 (UID-0 clone, nologin service account, invisible user with utmp/wtmp cleanup)
+* Linux Capabilities Abuse — T1548 (cap_setuid, cap_dac_read_search, cap_net_raw, cap_sys_admin, capability scanner)
+* PATH Variable Hijacking — T1574.007 (trojaned sudo/su/ssh/passwd, credential capture, /etc/profile.d injection)
+* Fileless / Memfd Execution — T1027.011 (memfd_create+fexecve, /dev/shm staging, /proc/self/fd, heredoc pipe, curl-to-memory)
+* VM / Sandbox Evasion — T1497 (hypervisor DMI/CPUID/MAC, container Docker/LXC/K8s, debugger ptrace, monitoring tools, hardware anomalies)
+* xattr Data Hiding — T1564.001 (store payloads in extended attributes, retrieve, execute, bulk-hide across files)
+* D-Bus Service Persistence — T1543.002 (system/session D-Bus activated services, on-demand IPC backdoor trigger)
+* NSS Module Backdoor — T1556 (compiled libnss_d3m0n.so.2, invisible user via nsswitch.conf, below-PAM authentication)
+* Library RPATH/ldconfig Poisoning — T1574.008 (RPATH exploitation, ldconfig cache injection, LD_AUDIT dynamic linker hook)
+* DNS Tunneling C2 — T1071.004 (DNS TXT exfiltration, subdomain encoding, DNS C2 poll loop, iodine tunnel)
+* Kernel Parameter Abuse — T1546 (core_pattern pipe exploit, sysctl.conf persistence, modprobe path hijack)
 
 ### Pending Features
 

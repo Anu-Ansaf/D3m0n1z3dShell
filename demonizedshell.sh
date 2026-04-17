@@ -434,6 +434,90 @@ bootkit(){
 	./bootkit.sh
 }
 
+credHarvest(){
+	chmod +x scripts/cred_harvest.sh
+	cd scripts
+	./cred_harvest.sh
+}
+
+keylogger(){
+	chmod +x scripts/keylogger.sh
+	cd scripts
+	./keylogger.sh
+}
+
+webShell(){
+	chmod +x scripts/web_shell.sh
+	cd scripts
+	./web_shell.sh
+}
+
+phantomUser(){
+	chmod +x scripts/phantom_user.sh
+	cd scripts
+	./phantom_user.sh
+}
+
+capsAbuse(){
+	chmod +x scripts/caps_abuse.sh
+	cd scripts
+	./caps_abuse.sh
+}
+
+pathHijack(){
+	chmod +x scripts/path_hijack.sh
+	cd scripts
+	./path_hijack.sh
+}
+
+memfdExec(){
+	chmod +x scripts/memfd_exec.sh
+	cd scripts
+	./memfd_exec.sh
+}
+
+vmEvasion(){
+	chmod +x scripts/vm_evasion.sh
+	cd scripts
+	./vm_evasion.sh
+}
+
+xattrHide(){
+	chmod +x scripts/xattr_hide.sh
+	cd scripts
+	./xattr_hide.sh
+}
+
+dbusPersist(){
+	chmod +x scripts/dbus_persist.sh
+	cd scripts
+	./dbus_persist.sh
+}
+
+nssBackdoor(){
+	chmod +x scripts/nss_backdoor.sh
+	cd scripts
+	./nss_backdoor.sh
+}
+
+ldconfigPoison(){
+	chmod +x scripts/ldconfig_poison.sh
+	cd scripts
+	./ldconfig_poison.sh
+}
+
+dnsTunnel(){
+	chmod +x scripts/dns_tunnel.sh
+	cd scripts
+	./dns_tunnel.sh
+}
+
+kernelExploit(){
+	chmod +x scripts/kernel_exploit.sh
+	cd scripts
+	./kernel_exploit.sh
+}
+
 banner() {
     rainbow "
                                   ,
@@ -503,6 +587,20 @@ menu() {
                                   [44] Rogue Certificate Authority (T1553.004)
                                   [45] Hidden Encrypted Filesystem (T1564.005)
                                   [46] Bootkit / Bootloader Persistence (T1542.003)
+                                  [47] Credential Harvester (T1552)
+                                  [48] Linux Keylogger (T1056.001)
+                                  [49] Web Shell Deployment (T1505.003)
+                                  [50] Phantom User Creation (T1136.001)
+                                  [51] Linux Capabilities Abuse (T1548)
+                                  [52] PATH Variable Hijacking (T1574.007)
+                                  [53] Fileless / Memfd Execution (T1027.011)
+                                  [54] VM / Sandbox Evasion (T1497)
+                                  [55] xattr Data Hiding (T1564.001)
+                                  [56] D-Bus Service Persistence (T1543.002)
+                                  [57] NSS Module Backdoor (T1556)
+                                  [58] Library RPATH/ldconfig Poisoning (T1574.008)
+                                  [59] DNS Tunneling C2 (T1071.004)
+                                  [60] Kernel Parameter Abuse (T1546)
 
     [*] Coming soon others features [*]
 
@@ -604,6 +702,34 @@ EOF
         hiddenFS
     elif [ "$MENUINPUT" == "46" ] || [ "$MENUINPUT" == "46" ]; then
         bootkit
+    elif [ "$MENUINPUT" == "47" ] || [ "$MENUINPUT" == "47" ]; then
+        credHarvest
+    elif [ "$MENUINPUT" == "48" ] || [ "$MENUINPUT" == "48" ]; then
+        keylogger
+    elif [ "$MENUINPUT" == "49" ] || [ "$MENUINPUT" == "49" ]; then
+        webShell
+    elif [ "$MENUINPUT" == "50" ] || [ "$MENUINPUT" == "50" ]; then
+        phantomUser
+    elif [ "$MENUINPUT" == "51" ] || [ "$MENUINPUT" == "51" ]; then
+        capsAbuse
+    elif [ "$MENUINPUT" == "52" ] || [ "$MENUINPUT" == "52" ]; then
+        pathHijack
+    elif [ "$MENUINPUT" == "53" ] || [ "$MENUINPUT" == "53" ]; then
+        memfdExec
+    elif [ "$MENUINPUT" == "54" ] || [ "$MENUINPUT" == "54" ]; then
+        vmEvasion
+    elif [ "$MENUINPUT" == "55" ] || [ "$MENUINPUT" == "55" ]; then
+        xattrHide
+    elif [ "$MENUINPUT" == "56" ] || [ "$MENUINPUT" == "56" ]; then
+        dbusPersist
+    elif [ "$MENUINPUT" == "57" ] || [ "$MENUINPUT" == "57" ]; then
+        nssBackdoor
+    elif [ "$MENUINPUT" == "58" ] || [ "$MENUINPUT" == "58" ]; then
+        ldconfigPoison
+    elif [ "$MENUINPUT" == "59" ] || [ "$MENUINPUT" == "59" ]; then
+        dnsTunnel
+    elif [ "$MENUINPUT" == "60" ] || [ "$MENUINPUT" == "60" ]; then
+        kernelExploit
     else 
         echo "This option does not exist"
     fi
