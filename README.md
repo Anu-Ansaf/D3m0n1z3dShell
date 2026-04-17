@@ -4,6 +4,8 @@
 
 Demonized Shell is an Advanced Tool for persistence in linux.
 
+> 📖 **[Full Technical Documentation with Flowcharts →](DOCS.md)** — Detailed Mermaid diagrams for all 84 techniques
+
 ### Install
 
 ```
