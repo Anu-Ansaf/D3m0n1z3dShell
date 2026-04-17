@@ -91,6 +91,40 @@ sudo curl -s https://raw.githubusercontent.com/MatheuZSecurity/D3m0n1z3dShell/ma
 * DNS Tunneling C2 — T1071.004 (DNS TXT exfiltration, subdomain encoding, DNS C2 poll loop, iodine tunnel)
 * Kernel Parameter Abuse — T1546 (core_pattern pipe exploit, sysctl.conf persistence, modprobe path hijack)
 
+### Windows Techniques (PowerShell Payload Generators)
+
+**Persistence (8 techniques):**
+* Registry Run Keys — T1547.001 (HKCU/HKLM/RunOnce, reverse shell payloads)
+* Scheduled Task — T1053.005 (logon/daily/idle/startup triggers, SYSTEM context)
+* Windows Service — T1543.003 (legit-sounding names, auto-restart recovery)
+* WMI Event Subscription — T1546.003 (fileless 3-part Filter+Consumer+Binding)
+* COM Object Hijacking — T1546.015 (ScriptletURL, InprocServer32, LocalServer32)
+* BITS Job Persistence — T1197 (SetNotifyCmdLine, survives reboots)
+* Startup Folder — T1547.001 (.lnk shortcut creation via COM)
+* DLL Search Order Hijacking — T1574.001 (Teams/OneDrive/Slack targets)
+
+**Defense Evasion (7 techniques):**
+* AMSI Bypass — T1562.001 (reflection, AmsiScanBuffer patch, obfuscated variants)
+* Disable Windows Defender — T1562.001 (MpPreference, registry, exclusion paths)
+* ETW Patching — T1562.006 (EtwEventWrite → ret, blinds .NET telemetry)
+* Event Log Clearing — T1070.001 (wevtutil, selective/all, disable service)
+* LOLBin Proxy Execution — T1218 (mshta, rundll32, regsvr32 Squiblydoo, certutil, msiexec)
+* Timestomping — T1070.006 (copy from legit file, specific date, randomize)
+* Parent PID Spoofing — T1134.004 (STARTUPINFOEX + P/Invoke CreateProcess)
+
+**Credential Access (5 techniques):**
+* LSASS Memory Dump — T1003.001 (comsvcs.dll, P/Invoke MiniDumpWriteDump)
+* SAM/SYSTEM/SECURITY Extraction — T1003.002 (reg save, Volume Shadow Copy)
+* Kerberoasting — T1558.003 (TGS ticket request, hashcat/john format output)
+* DPAPI Secret Extraction — T1555.004 (Chrome/Edge passwords, Credential Manager)
+* WiFi Password Extraction — T1552.001 (netsh wlan profiles, XML export)
+
+**Stealth & Indicator Removal (4 techniques):**
+* Alternate Data Streams — T1564.004 (hide in file/directory ADS, execute from ADS)
+* Hidden Files & Directories — T1564.001 (Super-hidden attributes, lock Explorer settings)
+* Process Name Masquerading — T1036.005 (trusted path mimic, legitimate process names)
+* Secure Deletion & Indicator Removal — T1070.004 (multi-pass wipe, forensic artifact cleanup)
+
 ### Pending Features
 
 And other types of features that will come in the future.

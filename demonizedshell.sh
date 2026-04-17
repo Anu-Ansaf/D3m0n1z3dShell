@@ -518,6 +518,30 @@ kernelExploit(){
 	./kernel_exploit.sh
 }
 
+winPersist(){
+	chmod +x scripts/win_persist.sh
+	cd scripts
+	./win_persist.sh
+}
+
+winEvasion(){
+	chmod +x scripts/win_evasion.sh
+	cd scripts
+	./win_evasion.sh
+}
+
+winCredAccess(){
+	chmod +x scripts/win_credaccess.sh
+	cd scripts
+	./win_credaccess.sh
+}
+
+winStealth(){
+	chmod +x scripts/win_stealth.sh
+	cd scripts
+	./win_stealth.sh
+}
+
 banner() {
     rainbow "
                                   ,
@@ -601,6 +625,12 @@ menu() {
                                   [58] Library RPATH/ldconfig Poisoning (T1574.008)
                                   [59] DNS Tunneling C2 (T1071.004)
                                   [60] Kernel Parameter Abuse (T1546)
+
+                                  ═══ Windows Techniques ═══
+                                  [61] Windows Persistence Generator (8 techniques)
+                                  [62] Windows Defense Evasion Generator (7 techniques)
+                                  [63] Windows Credential Access Generator (5 techniques)
+                                  [64] Windows Stealth & Indicator Removal (4 techniques)
 
     [*] Coming soon others features [*]
 
@@ -730,6 +760,14 @@ EOF
         dnsTunnel
     elif [ "$MENUINPUT" == "60" ] || [ "$MENUINPUT" == "60" ]; then
         kernelExploit
+    elif [ "$MENUINPUT" == "61" ] || [ "$MENUINPUT" == "61" ]; then
+        winPersist
+    elif [ "$MENUINPUT" == "62" ] || [ "$MENUINPUT" == "62" ]; then
+        winEvasion
+    elif [ "$MENUINPUT" == "63" ] || [ "$MENUINPUT" == "63" ]; then
+        winCredAccess
+    elif [ "$MENUINPUT" == "64" ] || [ "$MENUINPUT" == "64" ]; then
+        winStealth
     else 
         echo "This option does not exist"
     fi

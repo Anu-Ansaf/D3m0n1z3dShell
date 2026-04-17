@@ -3435,6 +3435,26 @@ SEOF
     esac
 }
 
+winPersist(){
+    echo -e "\033[1;33m[*] Windows Persistence Payload Generator requires the full version.\033[0m"
+    echo -e "\033[1;33m[*] Run: bash scripts/win_persist.sh from the D3m0n1z3dShell directory.\033[0m"
+}
+
+winEvasion(){
+    echo -e "\033[1;33m[*] Windows Defense Evasion Generator requires the full version.\033[0m"
+    echo -e "\033[1;33m[*] Run: bash scripts/win_evasion.sh from the D3m0n1z3dShell directory.\033[0m"
+}
+
+winCredAccess(){
+    echo -e "\033[1;33m[*] Windows Credential Access Generator requires the full version.\033[0m"
+    echo -e "\033[1;33m[*] Run: bash scripts/win_credaccess.sh from the D3m0n1z3dShell directory.\033[0m"
+}
+
+winStealth(){
+    echo -e "\033[1;33m[*] Windows Stealth & Indicator Removal requires the full version.\033[0m"
+    echo -e "\033[1;33m[*] Run: bash scripts/win_stealth.sh from the D3m0n1z3dShell directory.\033[0m"
+}
+
 banner() {
     :
 }
@@ -3489,6 +3509,12 @@ menu() {
                                   [51] Library RPATH/ldconfig Poisoning (T1574.008)
                                   [52] DNS Tunneling C2 (T1071.004)
                                   [53] Kernel Parameter Abuse (T1546)
+
+                                  ═══ Windows Techniques ═══
+                                  [54] Windows Persistence Generator (8 techniques)
+                                  [55] Windows Defense Evasion Generator (7 techniques)
+                                  [56] Windows Credential Access Generator (5 techniques)
+                                  [57] Windows Stealth & Indicator Removal (4 techniques)
 
     [*] Coming soon others features [*]
 
@@ -3604,6 +3630,14 @@ EOF
         dnsTunnel
     elif [ "$MENUINPUT" == "53" ] || [ "$MENUINPUT" == "53" ]; then
         kernelExploit
+    elif [ "$MENUINPUT" == "54" ] || [ "$MENUINPUT" == "54" ]; then
+        winPersist
+    elif [ "$MENUINPUT" == "55" ] || [ "$MENUINPUT" == "55" ]; then
+        winEvasion
+    elif [ "$MENUINPUT" == "56" ] || [ "$MENUINPUT" == "56" ]; then
+        winCredAccess
+    elif [ "$MENUINPUT" == "57" ] || [ "$MENUINPUT" == "57" ]; then
+        winStealth
     else 
         echo "This option does not exist"
     fi
