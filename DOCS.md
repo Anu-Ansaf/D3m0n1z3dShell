@@ -1,6 +1,6 @@
 # D3m0n1z3dShell — Technical Documentation
 
-> Complete technical documentation for all 93 techniques with detailed flowcharts showing every syscall, file write, and decision branch.
+> Complete technical documentation for all 102 techniques with detailed flowcharts showing every syscall, file write, and decision branch.
 
 ---
 
@@ -87,6 +87,16 @@
     - [71 — Modprobe.d Event Hijacking](#71--modprobed-event-hijacking)
     - [72 — GRUB Bootloader Backdoor](#72--grub-bootloader-backdoor)
     - [73 — Mount Namespace Stashspace](#73--mount-namespace-stashspace)
+- **Metasploit-Sourced Techniques**
+    - [74 — SystemD Drop-in Override](#74--systemd-drop-in-override)
+    - [75 — Yum/DNF Plugin Backdoor](#75--yumdnf-plugin-backdoor)
+    - [76 — Docker Container Persistence](#76--docker-container-persistence)
+    - [77 — OpenRC Service Persistence](#77--openrc-service-persistence)
+    - [78 — Upstart Service Persistence](#78--upstart-service-persistence)
+    - [79 — Emacs Extension Persistence](#79--emacs-extension-persistence)
+    - [80 — IGEL OS Persistence](#80--igel-os-persistence)
+    - [81 — WSL Startup Folder Persistence](#81--wsl-startup-folder-persistence)
+    - [82 — Periodic/Anacron Persistence](#82--periodicanacron-persistence)
 - **Windows Techniques**
   - [9. Windows Persistence Generator](#9-windows-persistence-generator)
   - [10. Windows Defense Evasion Generator](#10-windows-defense-evasion-generator)
@@ -2277,6 +2287,318 @@ flowchart TD
 
 ---
 
+### 74 — SystemD Drop-in Override
+
+**Script:** `scripts/systemd_override.sh` | **Menu:** [74] | **MITRE:** T1543.002  
+**Purpose:** Install ExecStartPost drop-in override on existing legitimate services (ssh, cron, etc.) so payloads execute whenever the service starts, without modifying the original unit file.
+
+```mermaid
+flowchart TD
+    A["systemd_override.sh"] --> B["Select:\n1. Reverse shell override\n2. Custom command\n3. List services\n4. List installed overrides\n5. Cleanup"]
+
+    B -->|1| C["List running services:\nsystemctl list-units --type=service"]
+    C --> D["User selects target service\ndefault: ssh"]
+    D --> E{"systemctl cat SERVICE\nService exists?"}
+    E -->|No| F["Abort"]
+    E -->|Yes| G["mkdir -p /etc/systemd/system/\nSERVICE.service.d/"]
+    G --> H["Write override.conf:\n[Service]\nExecStartPost=/bin/sh -c\nnohup bash revshell"]
+    H --> I["systemctl daemon-reload"]
+    I --> J["Payload fires on every\nservice start/restart"]
+
+    B -->|2| K["Same flow with custom command\ninstead of revshell"]
+
+    B -->|3| L["systemctl list-units\n--state=running"]
+
+    B -->|4| M["find /etc/systemd/system\n-name override.conf\ngrep MARKER"]
+
+    B -->|5| N["Remove override.conf files\nrmdir empty .d dirs\ndaemon-reload"]
+
+    style A fill:#ff4444,color:#fff
+    style H fill:#ff0000,color:#fff
+    style J fill:#44aa44,color:#fff
+    style N fill:#4488ff,color:#fff
+```
+
+**Key Insight:** SystemD drop-in directories (`/etc/systemd/system/SERVICE.service.d/`) allow overriding any directive without touching the original unit file. `ExecStartPost=` runs after the main process starts, so the payload piggybacks on legitimate service restarts. This survives package updates that would overwrite the original `.service` file.
+
+---
+
+### 75 — Yum/DNF Plugin Backdoor
+
+**Script:** `scripts/yum_backdoor.sh` | **Menu:** [75] | **MITRE:** T1546  
+**Purpose:** Inject payload execution into existing Yum/DNF Python plugins so code runs every time the package manager is invoked by the administrator.
+
+```mermaid
+flowchart TD
+    A["yum_backdoor.sh"] --> B["detect_pkg_manager():\ncheck yum vs dnf"]
+    B --> C["Select:\n1. Reverse shell injection\n2. Custom command\n3. List injected plugins\n4. Cleanup"]
+
+    C -->|1| D["Target: /usr/lib/yum-plugins/\nDefault: fastestmirror.py"]
+    D --> E{"Plugin exists and\nhas import os?"}
+    E -->|No| F["Abort"]
+    E -->|Yes| G["cp plugin plugin.d3m0n.bak"]
+    G --> H["sed -i after import os:\nos.system setsid\nbash revshell"]
+    H --> I["rm .pyc compiled cache"]
+    I --> J["Every yum/dnf command\ntriggers payload"]
+
+    C -->|2| K["Same injection flow\nwith custom os.system()"]
+
+    C -->|3| L["grep -rl MARKER\n/usr/lib/yum-plugins/"]
+
+    C -->|4| M["Restore .d3m0n.bak files\nto original names"]
+
+    style A fill:#ff4444,color:#fff
+    style H fill:#ff0000,color:#fff
+    style J fill:#44aa44,color:#fff
+    style M fill:#4488ff,color:#fff
+```
+
+**Key Insight:** Yum plugins are Python files loaded on every `yum`/`dnf` invocation. Since sysadmins routinely run package managers, the injected `os.system()` call fires frequently. The `.pyc` cache must be deleted to force Python to recompile the modified `.py` source.
+
+---
+
+### 76 — Docker Container Persistence
+
+**Script:** `scripts/docker_persist.sh` | **Menu:** [76] | **MITRE:** T1610  
+**Purpose:** Deploy a privileged Docker container with `--restart=always` and full host filesystem access that loops a payload indefinitely, surviving host reboots.
+
+```mermaid
+flowchart TD
+    A["docker_persist.sh"] --> B{"docker ps\naccessible?"}
+    B -->|No| C["Abort"]
+    B -->|Yes| D["Select:\n1. Deploy revshell container\n2. Custom command\n3. List containers\n4. Cleanup"]
+
+    D -->|1| E["docker pull alpine:latest"]
+    E --> F["Create entrypoint.sh:\nwhile true loop\nrevshell + sleep N"]
+    F --> G["docker create temp container\ndocker cp entrypoint.sh\ndocker commit to image"]
+    G --> H["docker run -dit\n--privileged\n-v /:/host\n--restart=always\n--label MARKER"]
+    H --> I["Container loops payload\nSurvives reboot via\nDocker restart policy"]
+
+    D -->|2| J["Same flow with\ncustom command in loop"]
+
+    D -->|3| K["docker ps -a\n--filter label=MARKER"]
+
+    D -->|4| L["docker rm -f containers\ndocker rmi images\nwith MARKER label/prefix"]
+
+    style A fill:#ff4444,color:#fff
+    style H fill:#ff0000,color:#fff
+    style I fill:#44aa44,color:#fff
+    style L fill:#4488ff,color:#fff
+```
+
+**Key Insight:** Docker's `--restart=always` policy ensures the container restarts after host reboot (as long as Docker daemon starts). The `--privileged -v /:/host` flags give full access to the host filesystem at `/host`. The image is committed so even if the container is deleted, the image can be re-run.
+
+---
+
+### 77 — OpenRC Service Persistence
+
+**Script:** `scripts/openrc_persist.sh` | **Menu:** [77] | **MITRE:** T1543  
+**Purpose:** Create an OpenRC init script for persistent service execution on Alpine Linux, Gentoo, and other OpenRC-based systems.
+
+```mermaid
+flowchart TD
+    A["openrc_persist.sh"] --> B{"rc-update\navailable?"}
+    B -->|No| C["Abort: not OpenRC"]
+    B -->|Yes| D["Select:\n1. Reverse shell service\n2. Custom command\n3. List installed\n4. Cleanup"]
+
+    D -->|1| E["Write /etc/init.d/SERVICE:\n#!/sbin/openrc-run\ncommand=/bin/sh\ncommand_args=revshell loop\ncommand_background=yes\npidfile=/run/SVC.pid"]
+    E --> F["depend block:\nneed net"]
+    F --> G["chmod 755\nrc-update add SERVICE default"]
+    G --> H["Service starts at boot\nwith network dependency"]
+
+    D -->|2| I["Same openrc-run format\nwith custom command"]
+
+    D -->|3| J["grep -rl MARKER\n/etc/init.d/"]
+
+    D -->|4| K["rc-service stop\nrc-update del\nrm init script"]
+
+    style A fill:#ff4444,color:#fff
+    style E fill:#ff0000,color:#fff
+    style H fill:#44aa44,color:#fff
+    style K fill:#4488ff,color:#fff
+```
+
+**Key Insight:** OpenRC uses a different init script format (`#!/sbin/openrc-run`) than SystemD. The `command_background="yes"` directive handles daemonization, and `depend()` ensures network is available before execution. Alpine Linux (common in containers and embedded systems) uses OpenRC by default.
+
+---
+
+### 78 — Upstart Service Persistence
+
+**Script:** `scripts/upstart_persist.sh` | **Menu:** [78] | **MITRE:** T1543  
+**Purpose:** Create Upstart job configurations for persistent execution on legacy Ubuntu (pre-15.04) and CentOS 6 systems.
+
+```mermaid
+flowchart TD
+    A["upstart_persist.sh"] --> B{"initctl\navailable?"}
+    B -->|No| C["Abort: not Upstart"]
+    B -->|Yes| D["Select:\n1. Reverse shell job\n2. Custom command\n3. List installed\n4. Cleanup"]
+
+    D -->|1| E["Write /etc/init/JOB.conf:\ndescription System Cache Manager\nstart on runlevel [2345]\nstop on runlevel [!2345]\nrespawn\nrespawn limit 10 5\nexec while-loop revshell"]
+    E --> F["initctl reload-configuration"]
+    F --> G["Job auto-starts on boot\nrespawns if killed"]
+
+    D -->|2| H["Same .conf format\nwith custom exec command"]
+
+    D -->|3| I["grep -rl MARKER\n/etc/init/"]
+
+    D -->|4| J["initctl stop job\nrm .conf file\ninitctl reload-configuration"]
+
+    style A fill:#ff4444,color:#fff
+    style E fill:#ff0000,color:#fff
+    style G fill:#44aa44,color:#fff
+    style J fill:#4488ff,color:#fff
+```
+
+**Key Insight:** Upstart's `respawn` directive automatically restarts the process if killed, with `respawn limit 10 5` allowing 10 restarts in 5 seconds before giving up. Many legacy enterprise systems still run Upstart (Ubuntu 10.04-14.10, CentOS 6, RHEL 6).
+
+---
+
+### 79 — Emacs Extension Persistence
+
+**Script:** `scripts/emacs_persist.sh` | **Menu:** [79] | **MITRE:** T1546  
+**Purpose:** Plant a malicious Emacs Lisp package that executes a payload whenever the target user launches Emacs.
+
+```mermaid
+flowchart TD
+    A["emacs_persist.sh"] --> B["Select:\n1. Reverse shell extension\n2. Custom command\n3. List installed\n4. Cleanup"]
+
+    B -->|1| C["Resolve target user homedir\nvia getent passwd"]
+    C --> D["mkdir ~/.emacs.d/lisp/"]
+    D --> E["Write d3m0n-helper.el:\ndefun d3m0n-system-init\nstart-process sys-cache\n/bin/sh -c revshell\nprovide d3m0n-helper"]
+    E --> F{"init.el already\nhas MARKER?"}
+    F -->|Yes| G["Skip init.el modification"]
+    F -->|No| H["Backup init.el\nAppend:\nadd-to-list load-path lisp\nrequire d3m0n-helper"]
+    H --> I["chown files to target user"]
+    I --> J["Payload fires on every\nEmacs startup"]
+
+    B -->|2| K["Same .el file with\ncustom shell command"]
+
+    B -->|3| L["find /home /root\n-name d3m0n-helper.el"]
+
+    B -->|4| M["Delete .el files\nRestore init.el.d3m0n.bak"]
+
+    style A fill:#ff4444,color:#fff
+    style E fill:#ff0000,color:#fff
+    style J fill:#44aa44,color:#fff
+    style M fill:#4488ff,color:#fff
+```
+
+**Key Insight:** Emacs Lisp's `start-process` launches external commands asynchronously without blocking the editor. The `(provide 'feature)` / `(require 'feature)` mechanism ensures the package loads automatically. Targets developers and sysadmins who use Emacs as their primary editor.
+
+---
+
+### 80 — IGEL OS Persistence
+
+**Script:** `scripts/igel_persist.sh` | **Menu:** [80] | **MITRE:** T1546  
+**Purpose:** Achieve persistence on IGEL OS thin client endpoints via writable partition exploitation or registry parameter injection.
+
+```mermaid
+flowchart TD
+    A["igel_persist.sh"] --> B{"IGEL OS detected?\n/etc/igel or\n/config/sessions"}
+    B -->|No| C["Abort: not IGEL"]
+    B -->|Yes| D["Select:\n1. /license partition\n2. Registry setparam\n3. Cleanup"]
+
+    D -->|1| E["mount -o remount,rw /license"]
+    E --> F["Write payload script to\n/license/.d3m0n_persist"]
+    F --> G["chmod 755"]
+    G --> H["mount -o remount,ro /license"]
+    H --> I["Payload persists across\nIGEL reboots"]
+
+    D -->|2| J["Read command from user"]
+    J --> K["base64 encode command"]
+    K --> L["setparam registry key:\nuserinterface.rccustom.\ncustom_cmd_net_final"]
+    L --> M["Payload runs after\nnetwork initialization"]
+
+    D -->|3| N["remount /license rw\nrm .d3m0n_persist\nremount ro\nclear setparam key"]
+
+    style A fill:#ff4444,color:#fff
+    style F fill:#ff0000,color:#fff
+    style L fill:#ff0000,color:#fff
+    style I fill:#44aa44,color:#fff
+    style M fill:#44aa44,color:#fff
+    style N fill:#4488ff,color:#fff
+```
+
+**Key Insight:** IGEL OS thin clients have a read-only filesystem with specific writable partitions (`/license`). The `setparam` command modifies the IGEL registry, and `custom_cmd_net_final` executes after network initialization on every boot. Base64 encoding avoids character escaping issues in the registry value.
+
+---
+
+### 81 — WSL Startup Folder Persistence
+
+**Script:** `scripts/wsl_persist.sh` | **Menu:** [81] | **MITRE:** T1546  
+**Purpose:** Establish cross-subsystem persistence from WSL by placing launchers in the Windows Startup folder or creating scheduled tasks.
+
+```mermaid
+flowchart TD
+    A["wsl_persist.sh"] --> B{"WSL detected?\ngrep microsoft\n/proc/version"}
+    B -->|No| C["Abort: not WSL"]
+    B -->|Yes| D["Resolve Windows paths:\ncmd.exe /C echo APPDATA\nwslpath conversion"]
+    D --> E["Select:\n1. VBS launcher\n2. BAT launcher\n3. Scheduled task\n4. Cleanup"]
+
+    E -->|1| F["Write .vbs to Startup:\nCreateObject WScript.Shell\nRun wsl.exe -d DISTRO\n-- /bin/sh -c PAYLOAD\nWindow style 0 hidden"]
+    F --> G["Stealthiest: no visible\nconsole window"]
+
+    E -->|2| H["Write .bat to Startup:\nstart /b wsl.exe -d DISTRO\n-- /bin/sh -c PAYLOAD"]
+
+    E -->|3| I["schtasks /Create\n/TN SystemCacheHelper\n/SC ONLOGON /RL HIGHEST\nwsl.exe -d DISTRO payload"]
+
+    E -->|4| J["rm Startup/*.SystemCacheHelper*\nschtasks /Delete /TN helper"]
+
+    style A fill:#ff4444,color:#fff
+    style F fill:#ff0000,color:#fff
+    style G fill:#44aa44,color:#fff
+    style H fill:#ff8800,color:#fff
+    style I fill:#ff8800,color:#fff
+    style J fill:#4488ff,color:#fff
+```
+
+**Key Insight:** WSL can invoke Windows executables and vice versa. By placing a VBS/BAT file in the Windows Startup folder from within WSL, Linux payloads execute on Windows user logon. The VBS method is stealthiest because `WScript.Shell.Run` with window style 0 hides the console entirely.
+
+---
+
+### 82 — Periodic/Anacron Persistence
+
+**Script:** `scripts/periodic_persist.sh` | **Menu:** [82] | **MITRE:** T1053  
+**Purpose:** Install persistent scripts via BSD periodic framework, anacron, or cron.daily directories, auto-detecting the best available mechanism.
+
+```mermaid
+flowchart TD
+    A["periodic_persist.sh"] --> B["detect_system()"]
+    B --> C{"System type?"}
+    C -->|BSD| D["/etc/periodic exists"]
+    C -->|Anacron| E["/etc/anacrontab exists"]
+    C -->|Linux| F["/etc/cron.daily exists"]
+
+    D --> G["Select:\n1. Revshell  2. Custom\n3. List  4. Cleanup"]
+    E --> G
+    F --> G
+
+    G -->|BSD| H["Write /etc/periodic/daily/\n999.d3m0n-persist\nchmod 755\nexit 0 at end"]
+
+    G -->|Anacron| I["Write script to\n/usr/local/bin/.d3m0n-periodic\nAdd to /etc/anacrontab:\nDAYS  DELAY  d3m0n-persist  PATH"]
+
+    G -->|cron.daily| J["Write /etc/cron.daily/\nd3m0n-persist\nchmod 755"]
+
+    H --> K["Runs daily/weekly/monthly\nvia periodic framework"]
+    I --> L["Runs on schedule\nwith delay randomization"]
+    J --> M["Runs daily via cron"]
+
+    G -->|Cleanup| N["Remove scripts\nClean anacrontab entries"]
+
+    style A fill:#ff4444,color:#fff
+    style H fill:#ff0000,color:#fff
+    style I fill:#ff0000,color:#fff
+    style J fill:#ff0000,color:#fff
+    style K fill:#44aa44,color:#fff
+    style L fill:#44aa44,color:#fff
+    style M fill:#44aa44,color:#fff
+    style N fill:#4488ff,color:#fff
+```
+
+**Key Insight:** BSD periodic runs scripts from `/etc/periodic/{daily,weekly,monthly}/` via the periodic utility. Anacron handles machines that aren't always on — it tracks last-run timestamps and executes missed jobs on next boot. The auto-detection cascade (periodic → anacron → cron.daily) ensures maximum compatibility across BSD, RHEL/CentOS, Debian, and other systems.
+
+---
+
 ## 9. Windows Persistence Generator
 
 **Script:** `scripts/win_persist.sh` | **Menu:** [61]  
@@ -2523,6 +2845,6 @@ flowchart TD
 
 ---
 
-> **Total: 93 techniques documented** — 69 Linux + 24 Windows sub-techniques  
-> **Diagrams: 99+ Mermaid flowcharts**, sequence diagrams, and state diagrams  
+> **Total: 102 techniques documented** — 78 Linux + 24 Windows sub-techniques  
+> **Diagrams: 108+ Mermaid flowcharts**, sequence diagrams, and state diagrams  
 > **Coverage: Complete MITRE ATT&CK mapping** across all tactics

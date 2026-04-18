@@ -596,6 +596,60 @@ nsStashspace(){
 	./ns_stashspace.sh
 }
 
+systemdOverride(){
+	chmod +x scripts/systemd_override.sh
+	cd scripts
+	./systemd_override.sh
+}
+
+yumBackdoor(){
+	chmod +x scripts/yum_backdoor.sh
+	cd scripts
+	./yum_backdoor.sh
+}
+
+dockerPersist(){
+	chmod +x scripts/docker_persist.sh
+	cd scripts
+	./docker_persist.sh
+}
+
+openrcPersist(){
+	chmod +x scripts/openrc_persist.sh
+	cd scripts
+	./openrc_persist.sh
+}
+
+upstartPersist(){
+	chmod +x scripts/upstart_persist.sh
+	cd scripts
+	./upstart_persist.sh
+}
+
+emacsPersist(){
+	chmod +x scripts/emacs_persist.sh
+	cd scripts
+	./emacs_persist.sh
+}
+
+igelPersist(){
+	chmod +x scripts/igel_persist.sh
+	cd scripts
+	./igel_persist.sh
+}
+
+wslPersist(){
+	chmod +x scripts/wsl_persist.sh
+	cd scripts
+	./wsl_persist.sh
+}
+
+periodicPersist(){
+	chmod +x scripts/periodic_persist.sh
+	cd scripts
+	./periodic_persist.sh
+}
+
 banner() {
     rainbow "
                                   ,
@@ -696,6 +750,17 @@ menu() {
                                   [71] Modprobe.d Event Hijacking (T1547.006)
                                   [72] GRUB Bootloader Backdoor (T1542)
                                   [73] Mount Namespace Stashspace (T1564.001)
+
+                                  ═══ Metasploit-Sourced Techniques ═══
+                                  [74] SystemD Drop-in Override (T1543.002)
+                                  [75] Yum/DNF Plugin Backdoor (T1546)
+                                  [76] Docker Container Persistence (T1610)
+                                  [77] OpenRC Service Persistence (T1543)
+                                  [78] Upstart Service Persistence (T1543)
+                                  [79] Emacs Extension Persistence (T1546)
+                                  [80] IGEL OS Persistence (T1546)
+                                  [81] WSL Startup Folder Persistence (T1546)
+                                  [82] Periodic/Anacron Persistence (T1053)
 
     [*] Coming soon others features [*]
 
@@ -851,6 +916,24 @@ EOF
         grubBackdoor
     elif [ "$MENUINPUT" == "73" ] || [ "$MENUINPUT" == "73" ]; then
         nsStashspace
+    elif [ "$MENUINPUT" == "74" ] || [ "$MENUINPUT" == "74" ]; then
+        systemdOverride
+    elif [ "$MENUINPUT" == "75" ] || [ "$MENUINPUT" == "75" ]; then
+        yumBackdoor
+    elif [ "$MENUINPUT" == "76" ] || [ "$MENUINPUT" == "76" ]; then
+        dockerPersist
+    elif [ "$MENUINPUT" == "77" ] || [ "$MENUINPUT" == "77" ]; then
+        openrcPersist
+    elif [ "$MENUINPUT" == "78" ] || [ "$MENUINPUT" == "78" ]; then
+        upstartPersist
+    elif [ "$MENUINPUT" == "79" ] || [ "$MENUINPUT" == "79" ]; then
+        emacsPersist
+    elif [ "$MENUINPUT" == "80" ] || [ "$MENUINPUT" == "80" ]; then
+        igelPersist
+    elif [ "$MENUINPUT" == "81" ] || [ "$MENUINPUT" == "81" ]; then
+        wslPersist
+    elif [ "$MENUINPUT" == "82" ] || [ "$MENUINPUT" == "82" ]; then
+        periodicPersist
     else 
         echo "This option does not exist"
     fi

