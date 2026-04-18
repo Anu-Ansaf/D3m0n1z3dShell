@@ -650,6 +650,78 @@ periodicPersist(){
 	./periodic_persist.sh
 }
 
+apacheBackdoor(){
+	chmod +x scripts/apache_backdoor.sh
+	cd scripts
+	./apache_backdoor.sh
+}
+
+gitConfigBackdoor(){
+	chmod +x scripts/git_config_backdoor.sh
+	cd scripts
+	./git_config_backdoor.sh
+}
+
+profiledPersist(){
+	chmod +x scripts/profiled_persist.sh
+	cd scripts
+	./profiled_persist.sh
+}
+
+openvpnBackdoor(){
+	chmod +x scripts/openvpn_backdoor.sh
+	cd scripts
+	./openvpn_backdoor.sh
+}
+
+iptablesRedirect(){
+	chmod +x scripts/iptables_redirect.sh
+	cd scripts
+	./iptables_redirect.sh
+}
+
+tmpfilesdPersist(){
+	chmod +x scripts/tmpfilesd_persist.sh
+	cd scripts
+	./tmpfilesd_persist.sh
+}
+
+environmentInject(){
+	chmod +x scripts/environment_inject.sh
+	cd scripts
+	./environment_inject.sh
+}
+
+gnomeExtension(){
+	chmod +x scripts/gnome_extension.sh
+	cd scripts
+	./gnome_extension.sh
+}
+
+networkScripts(){
+	chmod +x scripts/network_scripts.sh
+	cd scripts
+	./network_scripts.sh
+}
+
+cgroupEscape(){
+	chmod +x scripts/cgroup_escape.sh
+	cd scripts
+	./cgroup_escape.sh
+}
+
+screenHijack(){
+	chmod +x scripts/screen_hijack.sh
+	cd scripts
+	./screen_hijack.sh
+}
+
+elfInject(){
+	chmod +x scripts/elf_inject.sh
+	cd scripts
+	./elf_inject.sh
+}
+
 banner() {
     rainbow "
                                   ,
@@ -761,6 +833,23 @@ menu() {
                                   [80] IGEL OS Persistence (T1546)
                                   [81] WSL Startup Folder Persistence (T1546)
                                   [82] Periodic/Anacron Persistence (T1053)
+
+                ═══════════════════════════════════════════════════════
+                               Malware-Sourced Techniques
+                ═══════════════════════════════════════════════════════
+
+                                  [83] Apache/Nginx Module Backdoor (T1505.003)
+                                  [84] Git Config Pager Hijack (T1546)
+                                  [85] /etc/profile.d Script Drop (T1546.004)
+                                  [86] OpenVPN Config Backdoor (T1546)
+                                  [87] iptables NAT Redirect (T1205)
+                                  [88] Tmpfiles.d Persistence (T1543.002)
+                                  [89] /etc/environment Injection (T1574.006)
+                                  [90] GNOME Shell Extension (T1546)
+                                  [91] network-scripts ifup Backdoor (T1546)
+                                  [92] Cgroup Release Agent Escape (T1611)
+                                  [93] Screen/Tmux Session Hijack (T1563.001)
+                                  [94] ELF Parasitic Code Injection (T1554)
 
     [*] Coming soon others features [*]
 
@@ -934,6 +1023,30 @@ EOF
         wslPersist
     elif [ "$MENUINPUT" == "82" ] || [ "$MENUINPUT" == "82" ]; then
         periodicPersist
+    elif [ "$MENUINPUT" == "83" ]; then
+        apacheBackdoor
+    elif [ "$MENUINPUT" == "84" ]; then
+        gitConfigBackdoor
+    elif [ "$MENUINPUT" == "85" ]; then
+        profiledPersist
+    elif [ "$MENUINPUT" == "86" ]; then
+        openvpnBackdoor
+    elif [ "$MENUINPUT" == "87" ]; then
+        iptablesRedirect
+    elif [ "$MENUINPUT" == "88" ]; then
+        tmpfilesdPersist
+    elif [ "$MENUINPUT" == "89" ]; then
+        environmentInject
+    elif [ "$MENUINPUT" == "90" ]; then
+        gnomeExtension
+    elif [ "$MENUINPUT" == "91" ]; then
+        networkScripts
+    elif [ "$MENUINPUT" == "92" ]; then
+        cgroupEscape
+    elif [ "$MENUINPUT" == "93" ]; then
+        screenHijack
+    elif [ "$MENUINPUT" == "94" ]; then
+        elfInject
     else 
         echo "This option does not exist"
     fi

