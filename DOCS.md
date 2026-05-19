@@ -3125,6 +3125,430 @@ flowchart TD
 
 ---
 
-> **Total: 114 techniques documented** — 90 Linux + 24 Windows sub-techniques  
-> **Diagrams: 120+ Mermaid flowcharts**, sequence diagrams, and state diagrams  
+## Section 14: Cutting-Edge Techniques (2024-2026)
+
+> **Techniques 95–114** — Next-generation post-exploitation leveraging io_uring, BPF, FUSE, D-Bus, WireGuard, systemd extensions, and Kubernetes
+
+---
+
+#### 95 — io_uring Rootkit Operations
+
+> **Script:** `scripts/iouring_rootkit.sh` | **MITRE:** T1562.001
+
+```mermaid
+flowchart TD
+    A["iouring_rootkit.sh"] --> B{"Deploy or Cleanup?"}
+    B -->|Deploy| C["Compile io_uring C agent\nkernel ring buffer I/O"]
+    C --> D["Agent uses SYS_io_uring_setup\nAll I/O via submission queue"]
+    D --> E["No syscalls visible to:\nFalco, Tetragon, auditd\nseccomp, strace"]
+    E --> F["Install as systemd service\nio-ring-helper.service"]
+    F --> G["Persistent across reboots\nProcess name: kworker/u8:2"]
+    B -->|Cleanup| H["Stop & disable service\nRemove binary & workdir"]
+
+    style A fill:#cc3333,color:#fff
+    style E fill:#ff6600,color:#fff
+    style G fill:#44aa44,color:#fff
+```
+
+---
+
+#### 96 — BPFDoor Magic Packet Backdoor
+
+> **Script:** `scripts/bpfdoor_magic.sh` | **MITRE:** T1205.001
+
+```mermaid
+flowchart TD
+    A["bpfdoor_magic.sh"] --> B{"Deploy or Cleanup?"}
+    B -->|Deploy| C["Create raw socket sniffer\ntcpdump on all interfaces"]
+    C --> D["Listen for magic passphrase\nin any TCP/UDP packet"]
+    D --> E["Magic detected → extract\nsource IP from packet"]
+    E --> F["Spawn reverse shell to\nsource IP on configured port"]
+    F --> G["Persist via /etc/cron.d\nNo listening port visible"]
+    B -->|Cleanup| H["Kill sniffer process\nRemove cron & binary"]
+
+    style A fill:#cc3333,color:#fff
+    style D fill:#ff6600,color:#fff
+    style G fill:#44aa44,color:#fff
+```
+
+---
+
+#### 97 — NFQUEUE Userspace Backdoor
+
+> **Script:** `scripts/nfqueue_backdoor.sh` | **MITRE:** T1571
+
+```mermaid
+flowchart TD
+    A["nfqueue_backdoor.sh"] --> B{"Deploy or Cleanup?"}
+    B -->|Deploy| C["Monitor traffic on target port\nvia tcpdump packet inspection"]
+    C --> D["Search for magic keyword\nin packet payload"]
+    D --> E["Extract command after keyword\neval in background"]
+    E --> F["Invisible to netstat/ss\nPiggybacks existing traffic"]
+    F --> G["Persist via /etc/cron.d\nAuto-restart on reboot"]
+    B -->|Cleanup| H["Kill monitor, remove files"]
+
+    style A fill:#cc3333,color:#fff
+    style F fill:#ff6600,color:#fff
+    style G fill:#44aa44,color:#fff
+```
+
+---
+
+#### 98 — SO_REUSEPORT Socket Hijacking
+
+> **Script:** `scripts/reuseport_hijack.sh` | **MITRE:** T1557
+
+```mermaid
+flowchart TD
+    A["reuseport_hijack.sh"] --> B{"Deploy or Cleanup?"}
+    B -->|Deploy| C["Compile C socket hijacker\nSO_REUSEPORT + SO_REUSEADDR"]
+    C --> D["Bind alongside target service\nKernel round-robins connections"]
+    D --> E["Steal ~50% of incoming\nconnections transparently"]
+    E --> F["Capture credentials from\nfirst recv() on each conn"]
+    F --> G["Log to hidden file\nDaemonize with SIGCHLD ignore"]
+    B -->|Cleanup| H["Kill process, remove binary\nDelete captured credentials"]
+
+    style A fill:#cc3333,color:#fff
+    style E fill:#ff6600,color:#fff
+    style F fill:#44aa44,color:#fff
+```
+
+---
+
+#### 99 — Abstract Unix Socket Hijacking
+
+> **Script:** `scripts/abstract_socket.sh` | **MITRE:** T1559
+
+```mermaid
+flowchart TD
+    A["abstract_socket.sh"] --> B{"Action"}
+    B -->|List| C["Parse /proc/net/unix\nShow @ prefixed sockets"]
+    B -->|Deploy| D["Compile abstract socket server\nsun_path[0] = '\\0'"]
+    D --> E["No filesystem entry exists\nInvisible to ls/find/locate"]
+    E --> F["Accept connections → fork\ndup2 → exec /bin/sh"]
+    F --> G["Connect via:\nsocat - ABSTRACT-CONNECT:name"]
+    B -->|Cleanup| H["Kill server process"]
+
+    style A fill:#cc3333,color:#fff
+    style E fill:#ff6600,color:#fff
+    style G fill:#44aa44,color:#fff
+```
+
+---
+
+#### 100 — FUSE Filesystem Hiding
+
+> **Script:** `scripts/fuse_hide.sh` | **MITRE:** T1564.001
+
+```mermaid
+flowchart TD
+    A["fuse_hide.sh"] --> B{"Action"}
+    B -->|Hide PID| C["Create empty directory\n/tmp/.empty_$$"]
+    C --> D["mount --bind empty dir\nover /proc/PID"]
+    D --> E["PID invisible to ps/top\nNo kernel module needed"]
+    B -->|Cleanup| F["Find bind mounts on /proc\numount each overlay"]
+    F --> G["Processes visible again"]
+
+    style A fill:#cc3333,color:#fff
+    style E fill:#ff6600,color:#fff
+    style G fill:#44aa44,color:#fff
+```
+
+---
+
+#### 101 — D-Bus Method Interception
+
+> **Script:** `scripts/dbus_intercept.sh` | **MITRE:** T1559.001
+
+```mermaid
+flowchart TD
+    A["dbus_intercept.sh"] --> B{"Action"}
+    B -->|Monitor| C["dbus-monitor --system\nFilter: password/secret/psk"]
+    C --> D["Log credentials to hidden file\nCaptures polkit auth attempts"]
+    B -->|WiFi Extract| E["Parse NetworkManager configs\nnmcli -s show passwords"]
+    E --> F["Display all stored PSKs\nfrom system-connections/"]
+    B -->|Cleanup| G["Kill dbus-monitor\nRemove capture log"]
+
+    style A fill:#cc3333,color:#fff
+    style D fill:#ff6600,color:#fff
+    style F fill:#44aa44,color:#fff
+```
+
+---
+
+#### 102 — GnuPG Agent Hijacking
+
+> **Script:** `scripts/gpg_agent_hijack.sh` | **MITRE:** T1552.004
+
+```mermaid
+flowchart TD
+    A["gpg_agent_hijack.sh"] --> B{"Action"}
+    B -->|Find sockets| C["Search /run/user/*/gnupg/\nfor S.gpg-agent"]
+    B -->|Hijack| D["Set GPG_AGENT_INFO to\nfound socket path"]
+    D --> E["Export GNUPGHOME to\nagent's home directory"]
+    E --> F["gpg --list-secret-keys\nshows available keys"]
+    F --> G["Decrypt/sign without\nknowing passphrase"]
+    B -->|Cleanup| H["Unset GPG env vars"]
+
+    style A fill:#cc3333,color:#fff
+    style G fill:#ff6600,color:#fff
+```
+
+---
+
+#### 103 — Kerberos Keytab Theft
+
+> **Script:** `scripts/keytab_theft.sh` | **MITRE:** T1558.003
+
+```mermaid
+flowchart TD
+    A["keytab_theft.sh"] --> B{"Action"}
+    B -->|Find| C["Check /etc/krb5.keytab\nfind / -name *.keytab"]
+    C --> D["List ticket caches\n/tmp/krb5cc_*"]
+    B -->|Steal| E["Copy keytab to workdir\nklist -kte show principals"]
+    E --> F["kinit -kt stolen.keytab\nauthenticate as service"]
+    F --> G["Passwordless access to\nKerberos-protected services"]
+    B -->|Cleanup| H["Remove stolen keytab"]
+
+    style A fill:#cc3333,color:#fff
+    style G fill:#ff6600,color:#fff
+```
+
+---
+
+#### 104 — WireGuard Peer Injection
+
+> **Script:** `scripts/wireguard_inject.sh` | **MITRE:** T1133
+
+```mermaid
+flowchart TD
+    A["wireguard_inject.sh"] --> B{"Action"}
+    B -->|Enumerate| C["wg show interfaces\nList .conf files"]
+    B -->|Inject| D["Generate keypair\nwg genkey | wg pubkey"]
+    D --> E["wg set IFACE peer PUBKEY\nallowed-ips ATTACKER_IP/32"]
+    E --> F["Append [Peer] section\nto .conf for persistence"]
+    F --> G["Attacker connects as\nauthorized VPN peer"]
+    B -->|Cleanup| H["wg set peer remove\nSed delete from .conf"]
+
+    style A fill:#cc3333,color:#fff
+    style G fill:#ff6600,color:#fff
+```
+
+---
+
+#### 105 — GDB Init Persistence
+
+> **Script:** `scripts/gdbinit_persist.sh` | **MITRE:** T1546
+
+```mermaid
+flowchart TD
+    A["gdbinit_persist.sh"] --> B{"Deploy or Cleanup?"}
+    B -->|Deploy| C["Backup existing ~/.gdbinit"]
+    C --> D["Append define hook-run\nshell nohup cmd &"]
+    D --> E["Add Python block\nsubprocess.Popen for stealth"]
+    E --> F["Fires on every gdb run\nor gdb attach session"]
+    F --> G["Targets developers & reversers\nHigh-value credential theft"]
+    B -->|Cleanup| H["Restore backup or\nsed remove marker block"]
+
+    style A fill:#cc3333,color:#fff
+    style F fill:#ff6600,color:#fff
+    style G fill:#44aa44,color:#fff
+```
+
+---
+
+#### 106 — Vim/Neovim Plugin Persistence
+
+> **Script:** `scripts/vim_plugin_persist.sh` | **MITRE:** T1546
+
+```mermaid
+flowchart TD
+    A["vim_plugin_persist.sh"] --> B{"Deploy or Cleanup?"}
+    B -->|Deploy| C["Create ~/.vim/plugin/\nand ~/.config/nvim/plugin/"]
+    C --> D["Write VimL plugin:\ncall system() on load"]
+    D --> E["Write Lua plugin:\nvim.fn.jobstart on load"]
+    E --> F["Auto-loads on every\nvim/nvim session start"]
+    F --> G["Disguised as syntax_helpers.vim\nand lsp_config.lua"]
+    B -->|Cleanup| H["Find & remove files\ncontaining marker"]
+
+    style A fill:#cc3333,color:#fff
+    style F fill:#ff6600,color:#fff
+    style G fill:#44aa44,color:#fff
+```
+
+---
+
+#### 107 — Fish/Zsh Completions Persistence
+
+> **Script:** `scripts/shell_completions.sh` | **MITRE:** T1547.004
+
+```mermaid
+flowchart TD
+    A["shell_completions.sh"] --> B{"Shell target"}
+    B -->|Fish| C["Create conf.d/git_helpers.fish\nRuns on every fish startup"]
+    C --> D["set -q guard variable\ncommand sh -c payload"]
+    B -->|Zsh| E["Create ~/.zfunc/_docker\ncompdef completion function"]
+    E --> F["Fires on first docker\ntab-completion attempt"]
+    F --> G["Add fpath to ~/.zshrc\nif not already present"]
+    D --> H["Payload fires once per\nshell session via guard"]
+
+    style A fill:#cc3333,color:#fff
+    style D fill:#ff6600,color:#fff
+    style F fill:#ff6600,color:#fff
+```
+
+---
+
+#### 108 — Ansible facts.d Persistence
+
+> **Script:** `scripts/ansible_facts.sh` | **MITRE:** T1072
+
+```mermaid
+flowchart TD
+    A["ansible_facts.sh"] --> B{"Deploy or Cleanup?"}
+    B -->|Deploy| C["Create /etc/ansible/facts.d/\nhardware_info.fact"]
+    C --> D["Script outputs valid JSON\n(cpu info + timestamp)"]
+    D --> E["Hidden payload in background\nnohup before JSON output"]
+    E --> F["Fires on EVERY Ansible\nplaybook/setup module run"]
+    F --> G["Self-healing: Ansible recreates\nif removed by automation"]
+    B -->|Cleanup| H["Find & remove marker files"]
+
+    style A fill:#cc3333,color:#fff
+    style F fill:#ff6600,color:#fff
+    style G fill:#44aa44,color:#fff
+```
+
+---
+
+#### 109 — systemd Socket Activation Backdoor
+
+> **Script:** `scripts/socket_activation.sh` | **MITRE:** T1543.002
+
+```mermaid
+flowchart TD
+    A["socket_activation.sh"] --> B{"Deploy or Cleanup?"}
+    B -->|Deploy| C["Create .socket unit\nListenStream=0.0.0.0:PORT"]
+    C --> D["Create @.service unit\nExecStart=/bin/bash -i"]
+    D --> E["StandardInput=socket\nStandardOutput=socket"]
+    E --> F["systemctl enable --now\nZERO processes running"]
+    F --> G["Shell spawns ONLY when\nconnection arrives on port"]
+    B -->|Cleanup| H["Remove unit files\ndaemon-reload"]
+
+    style A fill:#cc3333,color:#fff
+    style F fill:#ff6600,color:#fff
+    style G fill:#44aa44,color:#fff
+```
+
+---
+
+#### 110 — inotify Trigger Execution
+
+> **Script:** `scripts/inotify_trigger.sh` | **MITRE:** T1546
+
+```mermaid
+flowchart TD
+    A["inotify_trigger.sh"] --> B{"Mode"}
+    B -->|Login trigger| C["inotifywait -e modify\n/var/log/auth.log"]
+    C --> D["Grep for 'Accepted' or\n'session opened'"]
+    D --> E["Fire payload on each\nnew login event"]
+    B -->|Dead-drop C2| F["Watch /dev/shm/.tasks\nfor close_write events"]
+    F --> G["Execute file contents\nWrite output to .output"]
+    G --> H["Operator writes commands\nReads results — no network"]
+    B -->|Cleanup| I["Kill watchers, remove files"]
+
+    style A fill:#cc3333,color:#fff
+    style E fill:#ff6600,color:#fff
+    style H fill:#44aa44,color:#fff
+```
+
+---
+
+#### 111 — fanotify File Access Hooking
+
+> **Script:** `scripts/fanotify_hook.sh` | **MITRE:** T1562.001
+
+```mermaid
+flowchart TD
+    A["fanotify_hook.sh"] --> B{"Deploy or Cleanup?"}
+    B -->|Deploy| C["Identify scanner processes\nclamscan, rkhunter, chkrootkit"]
+    C --> D["fanotify FAN_OPEN_PERM at\nVFS layer (requires C)"]
+    D --> E["Intercept file open requests\nCheck if scanner PID"]
+    E --> F["Deny access to protected files\n.d3m0n, libsystem_helper"]
+    F --> G["Scanners get EACCES/empty\nMalware files invisible"]
+    B -->|Cleanup| H["Kill hook process\nRemove workdir"]
+
+    style A fill:#cc3333,color:#fff
+    style F fill:#ff6600,color:#fff
+    style G fill:#44aa44,color:#fff
+```
+
+---
+
+#### 112 — systemd Portable Service Backdoor
+
+> **Script:** `scripts/portable_service.sh` | **MITRE:** T1543.002
+
+```mermaid
+flowchart TD
+    A["portable_service.sh"] --> B{"Deploy or Cleanup?"}
+    B -->|Deploy| C["Create /var/lib/extensions/monitoring\nwith extension-release"]
+    C --> D["Write systemd service unit\nmonitoring-agent.service"]
+    D --> E["Create agent binary in\nusr/bin/monitoring-agent-run"]
+    E --> F["systemd-sysext merge\nOverlays onto /usr"]
+    F --> G["Service persists across\npackage updates & sysext refresh"]
+    B -->|Cleanup| H["Stop service, remove extension\nsysext unmerge"]
+
+    style A fill:#cc3333,color:#fff
+    style F fill:#ff6600,color:#fff
+    style G fill:#44aa44,color:#fff
+```
+
+---
+
+#### 113 — TIOCSTI Terminal Injection
+
+> **Script:** `scripts/tiocsti_inject.sh` | **MITRE:** T1055
+
+```mermaid
+flowchart TD
+    A["tiocsti_inject.sh"] --> B{"Action"}
+    B -->|List| C["who — active terminals\nps aux grep bash/zsh"]
+    B -->|Inject| D["Identify target /dev/pts/N\nCheck write permissions"]
+    D --> E["Find shell PID on terminal\nvia ps -t"]
+    E --> F["Write command to\n/proc/PID/fd/0"]
+    F --> G["Command appears in target\nterminal as if typed"]
+    G --> H["Victim sees & may execute\nor it auto-executes"]
+    B -->|Cleanup| I["Remove workdir"]
+
+    style A fill:#cc3333,color:#fff
+    style F fill:#ff6600,color:#fff
+    style H fill:#44aa44,color:#fff
+```
+
+---
+
+#### 114 — Kubernetes API Abuse
+
+> **Script:** `scripts/k8s_abuse.sh` | **MITRE:** T1552.007
+
+```mermaid
+flowchart TD
+    A["k8s_abuse.sh"] --> B{"Action"}
+    B -->|Detect| C["Check /var/run/secrets/\nkubernetes.io/serviceaccount/"]
+    C --> D["Read token & namespace\nIdentify API server"]
+    B -->|Secrets| E["curl API with Bearer token\n/api/v1/namespaces/NS/secrets"]
+    E --> F["Save decoded secrets\nDB passwords, API keys"]
+    B -->|CronJob| G["POST to batch/v1 API\nCreate log-rotation CronJob"]
+    G --> H["Runs every 5 minutes\nAlpine container + payload"]
+    B -->|Cleanup| I["Remove workdir"]
+
+    style A fill:#cc3333,color:#fff
+    style F fill:#ff6600,color:#fff
+    style H fill:#44aa44,color:#fff
+```
+
+---
+
+> **Total: 134 techniques documented** — 110 Linux + 24 Windows sub-techniques  
+> **Diagrams: 140+ Mermaid flowcharts**, sequence diagrams, and state diagrams  
 > **Coverage: Complete MITRE ATT&CK mapping** across all tactics

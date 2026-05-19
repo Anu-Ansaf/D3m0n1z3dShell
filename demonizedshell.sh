@@ -722,6 +722,126 @@ elfInject(){
 	./elf_inject.sh
 }
 
+iouringRootkit(){
+	chmod +x scripts/iouring_rootkit.sh
+	cd scripts
+	./iouring_rootkit.sh
+}
+
+bpfdoorMagic(){
+	chmod +x scripts/bpfdoor_magic.sh
+	cd scripts
+	./bpfdoor_magic.sh
+}
+
+nfqueueBackdoor(){
+	chmod +x scripts/nfqueue_backdoor.sh
+	cd scripts
+	./nfqueue_backdoor.sh
+}
+
+reuseportHijack(){
+	chmod +x scripts/reuseport_hijack.sh
+	cd scripts
+	./reuseport_hijack.sh
+}
+
+abstractSocket(){
+	chmod +x scripts/abstract_socket.sh
+	cd scripts
+	./abstract_socket.sh
+}
+
+fuseHide(){
+	chmod +x scripts/fuse_hide.sh
+	cd scripts
+	./fuse_hide.sh
+}
+
+dbusIntercept(){
+	chmod +x scripts/dbus_intercept.sh
+	cd scripts
+	./dbus_intercept.sh
+}
+
+gpgAgentHijack(){
+	chmod +x scripts/gpg_agent_hijack.sh
+	cd scripts
+	./gpg_agent_hijack.sh
+}
+
+keytabTheft(){
+	chmod +x scripts/keytab_theft.sh
+	cd scripts
+	./keytab_theft.sh
+}
+
+wireguardInject(){
+	chmod +x scripts/wireguard_inject.sh
+	cd scripts
+	./wireguard_inject.sh
+}
+
+gdbinitPersist(){
+	chmod +x scripts/gdbinit_persist.sh
+	cd scripts
+	./gdbinit_persist.sh
+}
+
+vimPluginPersist(){
+	chmod +x scripts/vim_plugin_persist.sh
+	cd scripts
+	./vim_plugin_persist.sh
+}
+
+shellCompletions(){
+	chmod +x scripts/shell_completions.sh
+	cd scripts
+	./shell_completions.sh
+}
+
+ansibleFacts(){
+	chmod +x scripts/ansible_facts.sh
+	cd scripts
+	./ansible_facts.sh
+}
+
+socketActivation(){
+	chmod +x scripts/socket_activation.sh
+	cd scripts
+	./socket_activation.sh
+}
+
+inotifyTrigger(){
+	chmod +x scripts/inotify_trigger.sh
+	cd scripts
+	./inotify_trigger.sh
+}
+
+fanotifyHook(){
+	chmod +x scripts/fanotify_hook.sh
+	cd scripts
+	./fanotify_hook.sh
+}
+
+portableService(){
+	chmod +x scripts/portable_service.sh
+	cd scripts
+	./portable_service.sh
+}
+
+tiocstiInject(){
+	chmod +x scripts/tiocsti_inject.sh
+	cd scripts
+	./tiocsti_inject.sh
+}
+
+k8sAbuse(){
+	chmod +x scripts/k8s_abuse.sh
+	cd scripts
+	./k8s_abuse.sh
+}
+
 banner() {
     rainbow "
                                   ,
@@ -850,6 +970,31 @@ menu() {
                                   [92] Cgroup Release Agent Escape (T1611)
                                   [93] Screen/Tmux Session Hijack (T1563.001)
                                   [94] ELF Parasitic Code Injection (T1554)
+
+                ═══════════════════════════════════════════════════════
+                            Cutting-Edge Techniques (2024-2026)
+                ═══════════════════════════════════════════════════════
+
+                                  [95] io_uring Rootkit Operations (T1562.001)
+                                  [96] BPFDoor Magic Packet Backdoor (T1205.001)
+                                  [97] NFQUEUE Userspace Backdoor (T1571)
+                                  [98] SO_REUSEPORT Socket Hijack (T1557)
+                                  [99] Abstract Unix Socket Hijack (T1559)
+                                  [100] FUSE Filesystem Hiding (T1564.001)
+                                  [101] D-Bus Method Interception (T1559.001)
+                                  [102] GnuPG Agent Hijack (T1552.004)
+                                  [103] Kerberos Keytab Theft (T1558.003)
+                                  [104] WireGuard Peer Injection (T1133)
+                                  [105] GDB Init Persistence (T1546)
+                                  [106] Vim/Neovim Plugin Persistence (T1546)
+                                  [107] Fish/Zsh Completions Persistence (T1547.004)
+                                  [108] Ansible facts.d Persistence (T1072)
+                                  [109] systemd Socket Activation Backdoor (T1543.002)
+                                  [110] inotify Trigger Execution (T1546)
+                                  [111] fanotify File Access Hooking (T1562.001)
+                                  [112] systemd Portable Service Backdoor (T1543.002)
+                                  [113] TIOCSTI Terminal Injection (T1055)
+                                  [114] Kubernetes API Abuse (T1552.007)
 
     [*] Coming soon others features [*]
 
@@ -1047,6 +1192,46 @@ EOF
         screenHijack
     elif [ "$MENUINPUT" == "94" ]; then
         elfInject
+    elif [ "$MENUINPUT" == "95" ]; then
+        iouringRootkit
+    elif [ "$MENUINPUT" == "96" ]; then
+        bpfdoorMagic
+    elif [ "$MENUINPUT" == "97" ]; then
+        nfqueueBackdoor
+    elif [ "$MENUINPUT" == "98" ]; then
+        reuseportHijack
+    elif [ "$MENUINPUT" == "99" ]; then
+        abstractSocket
+    elif [ "$MENUINPUT" == "100" ]; then
+        fuseHide
+    elif [ "$MENUINPUT" == "101" ]; then
+        dbusIntercept
+    elif [ "$MENUINPUT" == "102" ]; then
+        gpgAgentHijack
+    elif [ "$MENUINPUT" == "103" ]; then
+        keytabTheft
+    elif [ "$MENUINPUT" == "104" ]; then
+        wireguardInject
+    elif [ "$MENUINPUT" == "105" ]; then
+        gdbinitPersist
+    elif [ "$MENUINPUT" == "106" ]; then
+        vimPluginPersist
+    elif [ "$MENUINPUT" == "107" ]; then
+        shellCompletions
+    elif [ "$MENUINPUT" == "108" ]; then
+        ansibleFacts
+    elif [ "$MENUINPUT" == "109" ]; then
+        socketActivation
+    elif [ "$MENUINPUT" == "110" ]; then
+        inotifyTrigger
+    elif [ "$MENUINPUT" == "111" ]; then
+        fanotifyHook
+    elif [ "$MENUINPUT" == "112" ]; then
+        portableService
+    elif [ "$MENUINPUT" == "113" ]; then
+        tiocstiInject
+    elif [ "$MENUINPUT" == "114" ]; then
+        k8sAbuse
     else 
         echo "This option does not exist"
     fi

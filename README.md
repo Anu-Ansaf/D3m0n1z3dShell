@@ -4,7 +4,7 @@
 
 Demonized Shell is an Advanced Tool for persistence in linux.
 
-> 📖 **[Full Technical Documentation with Flowcharts →](DOCS.md)** — Detailed Mermaid diagrams for all 114 techniques
+> 📖 **[Full Technical Documentation with Flowcharts →](DOCS.md)** — Detailed Mermaid diagrams for all 134 techniques
 
 ### Install
 
@@ -131,6 +131,29 @@ sudo curl -s https://raw.githubusercontent.com/MatheuZSecurity/D3m0n1z3dShell/ma
 * Cgroup Release Agent Escape — T1611 (cgroupv1 notify_on_release + release_agent host execution from container, nsenter fallback)
 * Screen/Tmux Session Hijack — T1563.001 (screen -X stuff / tmux send-keys injection, socket permission widening, shared persistent sessions)
 * ELF Parasitic Code Injection — T1554 (PT_NOTE→PT_LOAD segment repurpose, fork+payload stub, preserves original binary execution)
+
+### Cutting-Edge Techniques (2024-2026)
+
+* io_uring Rootkit Operations — T1562.001 (syscall-less I/O via kernel ring buffers, bypasses Falco/Tetragon/auditd/seccomp/strace)
+* BPFDoor Magic Packet Backdoor — T1205.001 (raw socket below firewall, magic passphrase trigger, no listening port visible)
+* NFQUEUE Userspace Backdoor — T1571 (netfilter queue intercept, invisible to netstat/ss, keyword-triggered command execution)
+* SO_REUSEPORT Socket Hijacking — T1557 (bind alongside running services, steal ~50% connections, credential capture)
+* Abstract Unix Socket Hijacking — T1559 (no filesystem entry, invisible to ls/find, covert IPC channel shell)
+* FUSE Filesystem Hiding — T1564.001 (overlay /proc with bind mounts, hide PIDs without kernel module)
+* D-Bus Method Interception — T1559.001 (system/session bus sniffing, polkit auth capture, WiFi PSK extraction)
+* GnuPG Agent Hijacking — T1552.004 (abuse cached agent sessions, decrypt/sign without passphrase)
+* Kerberos Keytab Theft — T1558.003 (steal keytab files for passwordless service authentication)
+* WireGuard Peer Injection — T1133 (inject attacker key as authorized peer, persist in config)
+* GDB Init Persistence — T1546 (.gdbinit hook-run + Python code execution, targets developers)
+* Vim/Neovim Plugin Persistence — T1546 (auto-load VimL/Lua plugins, fires on every editor launch)
+* Fish/Zsh Completions Persistence — T1547.004 (backdoor shell completions, triggers on startup or tab-complete)
+* Ansible facts.d Persistence — T1072 (custom fact script, self-healing on every playbook run)
+* systemd Socket Activation Backdoor — T1543.002 (zero-process backdoor, shell spawns only on connection)
+* inotify Trigger Execution — T1546 (event-driven payload, login trigger, dead-drop C2 via file watch)
+* fanotify File Access Hooking — T1562.001 (VFS-layer blocking of scanner file reads, anti-AV)
+* systemd Portable Service Backdoor — T1543.002 (sysext image persistence, survives updates)
+* TIOCSTI Terminal Injection — T1055 (inject commands into other terminal sessions via /proc)
+* Kubernetes API Abuse — T1552.007 (pod escape, secret theft, CronJob persistence in clusters)
 
 ### Windows Techniques (PowerShell Payload Generators)
 

